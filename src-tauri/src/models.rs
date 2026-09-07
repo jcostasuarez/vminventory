@@ -436,3 +436,212 @@ pub struct ResultadoValidacionQemu {
     pub ruta_resuelta: Option<String>,
     pub error: Option<String>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_app_state_lifecycle() {
+        let state = AppState::default();
+        assert!(!state.esta_cancelada());
+        assert_eq!(state.tarea_en_curso(), None);
+        assert_eq!(state.tareas_activas(), 0);
+
+        state.preparar_tarea(TAREA_RELEVAMIENTO, "Relevamiento de prueba");
+        assert_eq!(state.tarea_en_curso(), Some(TAREA_RELEVAMIENTO.to_string()));
+        assert_eq!(state.tareas_activas(), 1);
+        assert!(!state.esta_cancelada());
+
+        state.solicitar_cancelacion();
+        assert!(state.esta_cancelada());
+
+        state.finalizar_tarea(TAREA_RELEVAMIENTO);
+        assert_eq!(state.tarea_en_curso(), None);
+        assert_eq!(state.tareas_activas(), 0);
+    }
+
+    #[test]
+    fn test_task_guard_raii() {
+        let state = AppState::default();
+        {
+            let _guard = TaskGuard::new(&state, TAREA_INSPECCION_DIRECTA, "Inspección de disco");
+            assert_eq!(
+                state.tarea_en_curso(),
+                Some(TAREA_INSPECCION_DIRECTA.to_string())
+            );
+            assert_eq!(state.tareas_activas(), 1);
+        }
+        // Al salir del ámbito, TaskGuard debe liberar la tarea
+        assert_eq!(state.tarea_en_curso(), None);
+        assert_eq!(state.tareas_activas(), 0);
+    }
+
+    #[test]
+    fn test_configuracion_app_serde() {
+        let json_data = r#"{
+            "max_hilos": 8,
+            "modo_dump": true,
+            "incluir_system": true,
+            "forzar_qemu": false,
+            "ruta_qemu_img": "/usr/bin/qemu-img",
+            "ruta_reglas": null,
+            "tamano_chunk_kb": 1024,
+            "generar_discrepancias": true,
+            "habilitar_bitacora": true,
+            "mostrar_progreso_individual": true,
+            "nombre_archivo_salida": "salida.json"
+        }"#;
+
+        let config: ConfiguracionApp =
+            serde_json::from_str(json_data).expect("Debe deserializar ConfiguracionApp");
+        assert_eq!(config.max_hilos, Some(8));
+        assert!(config.modo_dump);
+        assert!(config.incluir_system);
+        assert!(!config.forzar_qemu);
+        assert_eq!(config.ruta_qemu_img.as_deref(), Some("/usr/bin/qemu-img"));
+        assert_eq!(config.ruta_reglas, None);
+        assert_eq!(config.tamano_chunk_kb, Some(1024));
+        assert!(config.generar_discrepancias);
+        assert!(config.habilitar_bitacora);
+        assert_eq!(config.nombre_archivo_salida.as_deref(), Some("salida.json"));
+
+        let serialized = serde_json::to_string(&config).expect("Debe serializar ConfiguracionApp");
+        assert!(serialized.contains("\"max_hilos\":8"));
+    }
+
+    #[test]
+    fn test_bd_relevamiento_serde() {
+        let bd = BdRelevamiento {
+            metadatos: MetadatosRelevamiento {
+                aplicacion: "VM Inventory".to_string(),
+                fecha_relevamiento: "2026-09-07".to_string(),
+                ruta_origen: "D:\\VMs".to_string(),
+                duracion_formateada: "00:05:30".to_string(),
+                total_vms: 1,
+                vms_exitosas: 1,
+                vms_con_observaciones: 0,
+                vms_discrepantes: 0,
+                vms_fallidas: 0,
+                total_programas: 2,
+                peso_total_gb: 25.5,
+                cancelado: false,
+            },
+            vms: vec![RegistroVM {
+                exitosa: true,
+                nombre_vm: "Windows 10 Dev".to_string(),
+                nombre_interno: Some("Win10-Dev".to_string()),
+                ruta_carpeta: "D:\\VMs\\Win10".to_string(),
+                propietario: Some("Juan".to_string()),
+                tipo_posesion: Some("Personas".to_string()),
+                elemento_asignado: Some("Juan".to_string()),
+                sistema_operativo: "Windows 10 Pro".to_string(),
+                hipervisor: Some("VMware".to_string()),
+                peso_gb: 25.5,
+                discrepante: false,
+                observaciones: vec![],
+                fecha_relevamiento: "2026-09-07".to_string(),
+                programas: vec![ProgramaClasificado {
+                    nombre: "PostgreSQL 15".to_string(),
+                    version: Some("15.2".to_string()),
+                    editor: Some("PostgreSQL Global Development Group".to_string()),
+                    categoria: Some("Bases de datos".to_string()),
+                    tags: vec!["db".to_string(), "sql".to_string()],
+                    relevante: true,
+                }],
+                peso_bytes: 27380416512,
+            }],
+        };
+
+        let json = serde_json::to_string_pretty(&bd).expect("Debe serializar BdRelevamiento");
+        let deserialized: BdRelevamiento =
+            serde_json::from_str(&json).expect("Debe deserializar BdRelevamiento");
+
+        assert_eq!(deserialized.metadatos.total_vms, 1);
+        assert_eq!(deserialized.vms.len(), 1);
+        assert_eq!(deserialized.vms[0].nombre_vm, "Windows 10 Dev");
+        assert_eq!(deserialized.vms[0].programas.len(), 1);
+        assert_eq!(deserialized.vms[0].programas[0].nombre, "PostgreSQL 15");
+        assert_eq!(
+            deserialized.vms[0].programas[0].categoria.as_deref(),
+            Some("Bases de datos")
+        );
+    }
+
+    #[test]
+    fn test_informe_directo_serde() {
+        let informe = InformeDirecto {
+            exito: true,
+            archivo: "test.vmdk".to_string(),
+            imagen: ResumenImagen {
+                formato: "VMDK".to_string(),
+                hipervisor: "VMware".to_string(),
+                tamano_virtual: 53687091200,
+                tamano_real: 21474836480,
+            },
+            estadisticas: ResumenEstadisticas {
+                modo_acceso: "Nativo".to_string(),
+                duracion_ms: 120,
+                bytes_leidos: 5242880,
+                invocaciones_qemu: 0,
+            },
+            vm_info: ResumenVmInfo {
+                os_nombre: "Ubuntu 22.04".to_string(),
+                os_edition_version: "22.04.3 LTS".to_string(),
+                os_build: "5.15.0".to_string(),
+                os_service_pack: String::new(),
+                vmtools_version: Some("12.1.0".to_string()),
+                hostname: Some("ubuntu-srv".to_string()),
+                arquitectura: Some("x86_64".to_string()),
+            },
+            sistema_operativo: "Ubuntu 22.04".to_string(),
+            esquema: "GPT".to_string(),
+            particiones: vec![ResumenParticion {
+                indice: 1,
+                inicio: 1048576,
+                tamano: 53686042624,
+                tipo: "Linux filesystem".to_string(),
+                etiqueta: Some("root".to_string()),
+                sistema_archivos: "ext4".to_string(),
+            }],
+            programas: vec![],
+            advertencias: vec![],
+        };
+
+        let json = serde_json::to_string(&informe).expect("Debe serializar InformeDirecto");
+        let res: InformeDirecto =
+            serde_json::from_str(&json).expect("Debe deserializar InformeDirecto");
+        assert_eq!(res.imagen.formato, "VMDK");
+        assert_eq!(res.particiones.len(), 1);
+        assert_eq!(res.particiones[0].sistema_archivos, "ext4");
+    }
+
+    #[test]
+    fn test_diagnostico_y_validacion_qemu_serde() {
+        let diag = DiagnosticoSistema {
+            equipo_ejecucion: "TEST-PC".to_string(),
+            sistema_operativo: "windows".to_string(),
+            arquitectura: "x86_64".to_string(),
+            hilos_cpu: 16,
+            hilos_recomendados: 8,
+            qemu_img_disponible: true,
+        };
+        let diag_json = serde_json::to_string(&diag).unwrap();
+        let diag_res: DiagnosticoSistema = serde_json::from_str(&diag_json).unwrap();
+        assert_eq!(diag_res.hilos_cpu, 16);
+
+        let qemu_val = ResultadoValidacionQemu {
+            es_valido: true,
+            version_info: Some("qemu-img version 8.2.0".to_string()),
+            ruta_resuelta: Some("C:\\qemu\\qemu-img.exe".to_string()),
+            error: None,
+        };
+        let qemu_json = serde_json::to_string(&qemu_val).unwrap();
+        let qemu_res: ResultadoValidacionQemu = serde_json::from_str(&qemu_json).unwrap();
+        assert!(qemu_res.es_valido);
+        assert_eq!(
+            qemu_res.version_info.as_deref(),
+            Some("qemu-img version 8.2.0")
+        );
+    }
+}

@@ -579,3 +579,152 @@ fn coincide(nombre: &str, editor: Option<&str>, patron: &str, patron_editor: Opt
         None => true,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn test_coincide_limite_palabra() {
+        // Palabra corta (longitud < 4): solo match de palabra completa
+        assert!(coincide("Git for Windows", None, "git", None));
+        assert!(coincide("Git", None, "git", None));
+        assert!(coincide("Cliente Git-SCM", None, "git", None));
+        assert!(!coincide("Logitech Gaming Software", None, "git", None));
+        assert!(!coincide("Digital Audio Workstation", None, "git", None));
+
+        // Palabra >= 4 caracteres: prefijo válido
+        assert!(coincide("Docker Desktop", None, "docker", None));
+        assert!(coincide("dockerservice", None, "docker", None));
+
+        // Patrones con espacios o símbolos: contención directa
+        assert!(coincide(
+            "Microsoft Visual Studio Code",
+            None,
+            "visual studio code",
+            None
+        ));
+        assert!(coincide("SQL Server 2019", None, "sql server", None));
+        assert!(!coincide("PostgreSQL", None, "mysql", None));
+
+        // Patrón vacío
+        assert!(!coincide("Cualquier Programa", None, "", None));
+        assert!(!coincide("Cualquier Programa", None, "   ", None));
+    }
+
+    #[test]
+    fn test_coincide_con_editor() {
+        assert!(coincide(
+            "Java 8 Update 351",
+            Some("Oracle Corporation"),
+            "java",
+            Some("oracle")
+        ));
+
+        assert!(!coincide(
+            "Java 8 Update 351",
+            Some("Adoptium"),
+            "java",
+            Some("oracle")
+        ));
+    }
+
+    #[test]
+    fn test_reglas_integradas_e_informacion() {
+        let reglas = ReglasClasificacion::integradas();
+        assert!(
+            !reglas.whitelist.is_empty(),
+            "La whitelist no debe estar vacía"
+        );
+        assert!(!reglas.ruido.is_empty(), "El ruido no debe estar vacío");
+        assert!(
+            !reglas.categorias.is_empty(),
+            "Las categorías no deben estar vacías"
+        );
+
+        let info = reglas.informacion();
+        assert_eq!(info.total_whitelist, reglas.whitelist.len());
+        assert!(!info.categorias.is_empty());
+        assert!(info.origen_reglas.contains("integradas"));
+    }
+
+    #[test]
+    fn test_clasificacion_jerarquia() {
+        let reglas = ReglasClasificacion::integradas();
+
+        // 1. Whitelist prioritaria (ej. Microsoft SQL Server)
+        let res_sql = reglas.clasificar("Microsoft SQL Server 2019", Some("Microsoft Corporation"));
+        assert!(res_sql.es_relevante);
+        assert!(res_sql.es_whitelist);
+        assert!(res_sql.categoria.is_some());
+
+        // 2. Ruido del sistema (ej. Microsoft Visual C++ Redistributable)
+        let res_ruido = reglas.clasificar(
+            "Microsoft Visual C++ 2015-2022 Redistributable (x64)",
+            Some("Microsoft Corporation"),
+        );
+        assert!(!res_ruido.es_relevante);
+        assert!(!res_ruido.es_whitelist);
+        assert_eq!(res_ruido.categoria, None);
+
+        // 3. Categoría temática no en whitelist (ej. PostgreSQL o Wireshark)
+        let res_cat =
+            reglas.clasificar("PostgreSQL 15", Some("PostgreSQL Global Development Group"));
+        assert!(res_cat.es_relevante);
+        assert!(!res_cat.es_whitelist);
+        assert!(res_cat.categoria.is_some());
+
+        // 4. Software no catalogado (se preserva pero sin categoría)
+        let res_desconocido = reglas.clasificar("SoftwareInternoDePrueba v99.0", None);
+        assert!(res_desconocido.es_relevante);
+        assert!(!res_desconocido.es_whitelist);
+        assert_eq!(res_desconocido.categoria, None);
+        assert!(res_desconocido.tags.is_empty());
+    }
+
+    #[test]
+    fn test_cargar_reglas_desde_archivo_y_fallback() {
+        // Fallback cuando la ruta no existe
+        let reglas_fallback = ReglasClasificacion::cargar(Some("archivo_que_no_existe_9999.toml"));
+        assert!(!reglas_fallback.whitelist.is_empty());
+        assert!(reglas_fallback.origen.contains("el archivo externo falló"));
+
+        // Carga exitosa de archivo TOML personalizado
+        let temp_toml = std::env::temp_dir().join("vminventory_test_reglas.toml");
+        let toml_content = r#"
+            [[whitelist]]
+            nombre = "MiSoftwareCritico"
+            editor = "MiEmpresa"
+            motivo = "Software clave de la organización"
+
+            [[ruido]]
+            nombre = "AgenteDeMonitoreoInterno"
+            motivo = "Telemetría interna descartable"
+
+            [[categoria]]
+            nombre = "Sistemas Propietarios"
+            patrones = ["MiSoftwareCritico", "ERP_Corporativo"]
+            tags = ["interno", "critico"]
+        "#;
+
+        let mut f = std::fs::File::create(&temp_toml).expect("Crear archivo TOML de prueba");
+        f.write_all(toml_content.as_bytes()).expect("Escribir TOML");
+
+        let reglas_custom = ReglasClasificacion::cargar(Some(temp_toml.to_str().unwrap()));
+        assert!(reglas_custom.origen.contains("combinado"));
+
+        // Debe clasificar según la nueva whitelist
+        let res1 = reglas_custom.clasificar("MiSoftwareCritico v2", Some("MiEmpresa"));
+        assert!(res1.es_relevante);
+        assert!(res1.es_whitelist);
+        assert_eq!(res1.categoria.as_deref(), Some("Sistemas Propietarios"));
+        assert!(res1.tags.contains(&"critico".to_string()));
+
+        // Debe descartar según el nuevo ruido
+        let res2 = reglas_custom.clasificar("AgenteDeMonitoreoInterno", None);
+        assert!(!res2.es_relevante);
+
+        let _ = std::fs::remove_file(&temp_toml);
+    }
+}

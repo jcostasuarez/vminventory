@@ -1,8 +1,9 @@
 //! # Motor de Relevamiento Masivo
 //! Pipeline de supervisión multihilo que:
 //!
-//! 1. Descubre imágenes de disco con `vmspect::list_vms` (`.qcow2`, `.raw`,
-//!    `.vmdk`, `.vdi`, `.vhdx`, ...), filtrando extents secundarios.
+//! 1. Descubre imágenes de disco de forma recursiva y tolerante a fallos de
+//!    permisos con `vmspect::is_vm_image` (`.qcow2`, `.raw`, `.vmdk`, `.vdi`,
+//!    `.vhdx`, ...), filtrando extents secundarios.
 //! 2. Agrupa las imágenes por carpeta contenedora (una carpeta = una VM) e
 //!    inspecciona sus discos en paralelo con un pool de hilos acotado por
 //!    `max_hilos`.
@@ -306,6 +307,110 @@ impl Supervision {
 }
 
 // ============================================================================
+// DESCUBRIMIENTO RESILIENTE DE IMÁGENES
+// ============================================================================
+
+/// Descubre recursivamente todas las imágenes de disco virtuales en un directorio.
+///
+/// A diferencia de una búsqueda recursiva rígida, maneja de forma tolerante a fallos
+/// los errores de permisos (`ERROR_ACCESS_DENIED` / os error 5, carpetas del sistema,
+/// `$RECYCLE.BIN`, etc.) en subdirectorios, omitiéndolos con una advertencia en la bitácora
+/// y permitiendo que el escaneo continúe en el resto del árbol de directorios.
+fn descubrir_imagenes(
+    origen: &Path,
+    supervision: &mut Supervision,
+    app: Option<&AppHandle>,
+) -> Result<Vec<PathBuf>, String> {
+    if !origen.exists() {
+        return Err(format!(
+            "El directorio origen no existe: {}",
+            origen.display()
+        ));
+    }
+    if !origen.is_dir() {
+        return Err(format!(
+            "La ruta especificada no es un directorio: {}",
+            origen.display()
+        ));
+    }
+
+    let mut imagenes = Vec::new();
+    let mut cola = VecDeque::new();
+    cola.push_back(origen.to_path_buf());
+
+    while let Some(directorio_actual) = cola.pop_front() {
+        if supervision.cancelada() {
+            break;
+        }
+
+        let entradas = match std::fs::read_dir(&directorio_actual) {
+            Ok(e) => e,
+            Err(e) => {
+                if &directorio_actual == origen {
+                    let detalle = if e.kind() == std::io::ErrorKind::PermissionDenied
+                        || e.raw_os_error() == Some(5)
+                    {
+                        format!(
+                            "Acceso denegado al directorio «{}». Verifique los permisos de la carpeta o ejecute la aplicación como Administrador.",
+                            origen.display()
+                        )
+                    } else {
+                        format!(
+                            "No se pudo acceder al directorio «{}»: {e}",
+                            origen.display()
+                        )
+                    };
+                    return Err(detalle);
+                } else {
+                    supervision.registrar_log(
+                        "advertencia",
+                        "",
+                        format!(
+                            "Subcarpeta omitida por falta de permisos o inaccesible: {}",
+                            directorio_actual.display()
+                        ),
+                    );
+                    if let Some(app) = app {
+                        supervision.emitir(
+                            app,
+                            "escaneando_directorio",
+                            format!("Escaneando «{}»...", origen.display()),
+                        );
+                    }
+                    continue;
+                }
+            }
+        };
+
+        for entrada in entradas {
+            if supervision.cancelada() {
+                break;
+            }
+
+            let entrada = match entrada {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let path = entrada.path();
+            let file_type = match entrada.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+
+            if file_type.is_dir() {
+                cola.push_back(path);
+            } else if file_type.is_file() && vmspect::is_vm_image(&path) {
+                imagenes.push(path);
+            }
+        }
+    }
+
+    imagenes.sort();
+    Ok(imagenes)
+}
+
+// ============================================================================
 // PIPELINE PRINCIPAL
 // ============================================================================
 
@@ -358,7 +463,7 @@ pub fn ejecutar_relevamiento(
         "escaneando_directorio",
         format!("Escaneando «{ruta_origen}» en busca de imágenes de disco..."),
     );
-    let imagenes = match vmspect::list_vms(&origen, true) {
+    let imagenes = match descubrir_imagenes(&origen, &mut supervision, Some(app)) {
         Ok(lista) => lista,
         Err(e) => {
             supervision.emitir(
@@ -366,7 +471,7 @@ pub fn ejecutar_relevamiento(
                 "error",
                 format!("Fallo el escaneo del directorio: {e}"),
             );
-            return Err(e.to_string());
+            return Err(e);
         }
     };
 
@@ -841,5 +946,251 @@ fn sanitizar_nombre_salida(nombre: Option<&str>) -> String {
         solo_nombre.to_string()
     } else {
         format!("{solo_nombre}.json")
+    }
+}
+
+// ============================================================================
+// TESTS UNITARIOS
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::Write;
+
+    #[test]
+    fn test_sanitizar_nombre_salida() {
+        assert_eq!(sanitizar_nombre_salida(None), "Relevamiento_VMs.json");
+        assert_eq!(sanitizar_nombre_salida(Some("")), "Relevamiento_VMs.json");
+        assert_eq!(
+            sanitizar_nombre_salida(Some("mi_inventario")),
+            "mi_inventario.json"
+        );
+        assert_eq!(
+            sanitizar_nombre_salida(Some("mi_inventario.json")),
+            "mi_inventario.json"
+        );
+        assert_eq!(
+            sanitizar_nombre_salida(Some("C:\\ruta\\peligrosa\\salida")),
+            "salida.json"
+        );
+    }
+
+    #[test]
+    fn test_normalizar_nombre() {
+        assert_eq!(normalizar_nombre("Win-10_SRV 01"), "win10srv01");
+        assert_eq!(normalizar_nombre("Ubuntu-22.04"), "ubuntu2204");
+    }
+
+    #[test]
+    fn test_deducir_tipo_posesion() {
+        assert_eq!(
+            deducir_tipo_posesion(Path::new("D:\\Servidores\\VM1")),
+            Some("Servidores".to_string())
+        );
+        assert_eq!(
+            deducir_tipo_posesion(Path::new("D:\\Discos_Sueltos\\VM2")),
+            Some("Discos".to_string())
+        );
+        assert_eq!(
+            deducir_tipo_posesion(Path::new("D:\\JuanPerez\\VM3")),
+            Some("Personas".to_string())
+        );
+    }
+
+    #[test]
+    fn test_descubrir_imagenes_inexistente() {
+        let cancelacion = Arc::new(AtomicBool::new(false));
+        let mut supervision = Supervision::new(cancelacion);
+        let ruta = Path::new("ruta_que_definitivamente_no_existe_12345678");
+        let resultado = descubrir_imagenes(ruta, &mut supervision, None);
+        assert!(resultado.is_err());
+    }
+
+    #[test]
+    fn test_descubrir_imagenes_recursivo() {
+        let temp_dir = std::env::temp_dir().join("vminventory_test_descubrimiento");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("sub1/sub2")).unwrap();
+
+        // Creamos archivos de prueba
+        let mut f1 = File::create(temp_dir.join("disk1.vmdk")).unwrap();
+        f1.write_all(b"# Disk DescriptorFile\nversion=1\n").unwrap();
+
+        let mut f2 = File::create(temp_dir.join("sub1/sub2/disk2.qcow2")).unwrap();
+        f2.write_all(b"QFI\xfb\0\0\0\x03").unwrap();
+
+        // Extent secundario (debe ser ignorado por vmspect::is_vm_image)
+        let mut f3 = File::create(temp_dir.join("disk1-flat.vmdk")).unwrap();
+        f3.write_all(b"fake data").unwrap();
+
+        // Archivo no VM
+        let mut f4 = File::create(temp_dir.join("readme.txt")).unwrap();
+        f4.write_all(b"texto").unwrap();
+
+        let cancelacion = Arc::new(AtomicBool::new(false));
+        let mut supervision = Supervision::new(cancelacion);
+        let imagenes = descubrir_imagenes(&temp_dir, &mut supervision, None).unwrap();
+
+        assert_eq!(imagenes.len(), 2);
+        assert!(imagenes.iter().any(|p| p.ends_with("disk1.vmdk")));
+        assert!(imagenes.iter().any(|p| p.ends_with("disk2.qcow2")));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_formatear_duracion() {
+        assert_eq!(formatear_duracion(0), "00:00");
+        assert_eq!(formatear_duracion(59), "00:59");
+        assert_eq!(formatear_duracion(60), "01:00");
+        assert_eq!(formatear_duracion(3599), "59:59");
+        assert_eq!(formatear_duracion(3600), "1:00:00");
+        assert_eq!(formatear_duracion(3665), "1:01:05");
+        assert_eq!(formatear_duracion(86400), "24:00:00");
+    }
+
+    #[test]
+    fn test_marcas_temporales_y_fechas() {
+        let mt = marca_temporal();
+        assert_eq!(mt.len(), 8); // "HH:MM:SS"
+        assert_eq!(&mt[2..3], ":");
+        assert_eq!(&mt[5..6], ":");
+
+        let f_iso = fecha_iso();
+        assert_eq!(f_iso.len(), 10); // "YYYY-MM-DD"
+        assert_eq!(&f_iso[4..5], "-");
+        assert_eq!(&f_iso[7..8], "-");
+
+        let fh_iso = fecha_hora_iso();
+        assert_eq!(fh_iso.len(), 19); // "YYYY-MM-DDTHH:MM:SS"
+        assert_eq!(&fh_iso[10..11], "T");
+
+        let (y, m, d) = dias_a_civil(0);
+        assert_eq!((y, m, d), (1970, 1, 1));
+    }
+
+    #[test]
+    fn test_construir_opciones() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let config = ConfiguracionApp {
+            max_hilos: Some(4),
+            modo_dump: true,
+            incluir_system: true,
+            forzar_qemu: true,
+            ruta_qemu_img: Some("C:\\qemu\\qemu-img.exe".to_string()),
+            ruta_reglas: None,
+            tamano_chunk_kb: Some(2048),
+            generar_discrepancias: false,
+            habilitar_bitacora: false,
+            mostrar_progreso_individual: false,
+            nombre_archivo_salida: None,
+        };
+
+        let opt = construir_opciones(&config, &cancel);
+        assert!(opt.include_system);
+        assert!(opt.force_nbd);
+        assert_eq!(opt.chunk_size, Some(2048 * 1024));
+        assert_eq!(opt.qemu_nbd, Some(PathBuf::from("C:\\qemu\\qemu-img.exe")));
+        assert!(opt.cancel_token.is_some());
+    }
+
+    #[test]
+    fn test_clasificar_programas() {
+        let reglas = ReglasClasificacion::integradas();
+        let progs_raw = vec![
+            vmspect::Program {
+                name: "PostgreSQL 14".to_string(),
+                version: Some("14.0".to_string()),
+                publisher: Some("PostgreSQL Global Development Group".to_string()),
+                source: None,
+            },
+            vmspect::Program {
+                name: "Microsoft Visual C++ 2015-2022 Redistributable (x64)".to_string(),
+                version: Some("14.30".to_string()),
+                publisher: Some("Microsoft Corporation".to_string()),
+                source: None,
+            },
+            vmspect::Program {
+                name: "AppEmpresarialCustom".to_string(),
+                version: Some("1.0.0".to_string()),
+                publisher: None,
+                source: None,
+            },
+        ];
+
+        // En modo normal (modo_dump = false), el ruido de Visual C++ debe ser descartado
+        let clasificados = clasificar_programas(&progs_raw, &reglas, false);
+        assert_eq!(clasificados.len(), 2);
+        assert!(clasificados.iter().any(|p| p.nombre == "PostgreSQL 14"));
+        assert!(clasificados
+            .iter()
+            .any(|p| p.nombre == "AppEmpresarialCustom"));
+        assert!(!clasificados.iter().any(|p| p.nombre.contains("Visual C++")));
+
+        // En modo dump (modo_dump = true), se conservan todos
+        let clasificados_dump = clasificar_programas(&progs_raw, &reglas, true);
+        assert_eq!(clasificados_dump.len(), 3);
+    }
+
+    #[test]
+    fn test_supervision_lifecycle() {
+        let cancelacion = Arc::new(AtomicBool::new(false));
+        let sup = Supervision::new(cancelacion.clone());
+        assert_eq!(sup.cancelada(), false);
+
+        sup.registrar_log("INFO", "vm1", "Iniciando escaneo".to_string());
+        assert_eq!(sup.logs.lock().unwrap().len(), 1);
+
+        sup.actualizar_activa(
+            0,
+            "vm1",
+            "Inspeccionando partición",
+            50,
+            Some("MBR".to_string()),
+        );
+        assert_eq!(sup.activas.lock().unwrap().len(), 1);
+        assert_eq!(
+            sup.activas.lock().unwrap().get(&0).unwrap().nombre_vm,
+            "vm1"
+        );
+
+        sup.remover_activa(0);
+        assert_eq!(sup.activas.lock().unwrap().len(), 0);
+
+        sup.procesadas.store(5, Ordering::SeqCst);
+        sup.exitosas.store(4, Ordering::SeqCst);
+        sup.con_observaciones.store(1, Ordering::SeqCst);
+        let snap = sup.snapshot("analizando_v_ms", "En curso".to_string());
+        assert_eq!(snap.vms_procesadas, 5);
+        assert_eq!(snap.vms_exitosas, 4);
+        assert_eq!(snap.vms_con_observaciones, 1);
+    }
+
+    #[test]
+    fn test_detectar_nombre_interno_vmx_y_vbox() {
+        let temp_dir = std::env::temp_dir().join("vminventory_test_internos");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // 1. Archivo .vmx
+        let vmx_path = temp_dir.join("maquina.vmx");
+        let mut f_vmx = File::create(&vmx_path).unwrap();
+        f_vmx.write_all(b"config.version = \"8\"\ndisplayName = \"Mi Servidor Windows 2022\"\nmemsize = \"4096\"\n").unwrap();
+
+        let nombre_vmx = detectar_nombre_interno(&temp_dir);
+        assert_eq!(nombre_vmx, Some("Mi Servidor Windows 2022".to_string()));
+        let _ = std::fs::remove_file(&vmx_path);
+
+        // 2. Archivo .vbox
+        let vbox_path = temp_dir.join("maquina.vbox");
+        let mut f_vbox = File::create(&vbox_path).unwrap();
+        f_vbox.write_all(b"<?xml version=\"1.0\"?>\n<VirtualBox><Machine name=\"Ubuntu Database Srv\" uuid=\"{12345}\"></Machine></VirtualBox>").unwrap();
+
+        let nombre_vbox = detectar_nombre_interno(&temp_dir);
+        assert_eq!(nombre_vbox, Some("Ubuntu Database Srv".to_string()));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

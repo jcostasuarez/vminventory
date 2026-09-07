@@ -728,3 +728,283 @@ pub fn ventana_maximizar_restaurar(window: tauri::Window) -> Result<(), String> 
 pub fn ventana_cerrar() -> Result<(), String> {
     std::process::exit(0);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{MetadatosRelevamiento, ProgramaClasificado, RegistroVM};
+    use std::fs::File;
+    use std::io::Write;
+
+    fn crear_vm_ejemplo() -> (RegistroVM, ProgramaClasificado) {
+        let programa = ProgramaClasificado {
+            nombre: "Microsoft SQL Server 2019".to_string(),
+            version: Some("15.0.2000".to_string()),
+            editor: Some("Microsoft Corporation".to_string()),
+            categoria: Some("Bases de datos".to_string()),
+            tags: vec!["db".to_string(), "sql".to_string(), "rdbms".to_string()],
+            relevante: true,
+        };
+
+        let vm = RegistroVM {
+            exitosa: true,
+            nombre_vm: "SRV-SQL-PROD".to_string(),
+            nombre_interno: Some("SRV-SQL-INTERNAL".to_string()),
+            ruta_carpeta: "D:\\Servidores\\SRV-SQL-PROD".to_string(),
+            propietario: Some("Infraestructura".to_string()),
+            tipo_posesion: Some("Servidores".to_string()),
+            elemento_asignado: Some("Cluster-A".to_string()),
+            sistema_operativo: "Windows Server 2022".to_string(),
+            hipervisor: Some("VMware".to_string()),
+            peso_gb: 40.0,
+            discrepante: false,
+            observaciones: vec![],
+            fecha_relevamiento: "2026-09-07".to_string(),
+            programas: vec![programa.clone()],
+            peso_bytes: 42949672960,
+        };
+
+        (vm, programa)
+    }
+
+    #[test]
+    fn test_filtros_consulta_normalizacion_y_alguno() {
+        let f_vacio =
+            FiltrosConsulta::nuevo(None, Some("   ".to_string()), None, None, None, None, None);
+        assert!(!f_vacio.alguno());
+
+        let f_prog = FiltrosConsulta::nuevo(
+            Some("  PostgreSQL  ".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(f_prog.alguno());
+        assert_eq!(f_prog.programa.as_deref(), Some("postgresql"));
+    }
+
+    #[test]
+    fn test_filtros_consulta_cumple() {
+        let (vm, prog) = crear_vm_ejemplo();
+
+        // 1. Coincidencia por nombre de programa
+        let f1 = FiltrosConsulta::nuevo(
+            Some("sql server".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(f1.cumple(&vm, &prog));
+
+        // 2. Coincidencia por tag
+        let f2 = FiltrosConsulta::nuevo(
+            Some("rdbms".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(f2.cumple(&vm, &prog));
+
+        // 3. Coincidencia por nombre de VM (carpeta)
+        let f3 = FiltrosConsulta::nuevo(
+            None,
+            Some("srv-sql".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(f3.cumple(&vm, &prog));
+
+        // 4. Coincidencia por nombre interno
+        let f4 = FiltrosConsulta::nuevo(
+            None,
+            Some("internal".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(f4.cumple(&vm, &prog));
+
+        // 5. Coincidencia por versión
+        let f5 =
+            FiltrosConsulta::nuevo(None, None, Some("15.0".to_string()), None, None, None, None);
+        assert!(f5.cumple(&vm, &prog));
+
+        // 6. Coincidencia por tipo de posesión
+        let f6 = FiltrosConsulta::nuevo(
+            None,
+            None,
+            None,
+            Some("servidores".to_string()),
+            None,
+            None,
+            None,
+        );
+        assert!(f6.cumple(&vm, &prog));
+
+        // 7. Coincidencia por propietario
+        let f7 = FiltrosConsulta::nuevo(
+            None,
+            None,
+            None,
+            None,
+            Some("infra".to_string()),
+            None,
+            None,
+        );
+        assert!(f7.cumple(&vm, &prog));
+
+        // 8. Coincidencia por SO
+        let f8 = FiltrosConsulta::nuevo(
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("windows".to_string()),
+            None,
+        );
+        assert!(f8.cumple(&vm, &prog));
+
+        // 9. Coincidencia por categoría
+        let f9 = FiltrosConsulta::nuevo(
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("bases de datos".to_string()),
+        );
+        assert!(f9.cumple(&vm, &prog));
+
+        // 10. No coincide cuando un filtro no hace match
+        let f_mismatch = FiltrosConsulta::nuevo(
+            Some("nginx".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(!f_mismatch.cumple(&vm, &prog));
+    }
+
+    #[test]
+    fn test_consultar_software_end_to_end() {
+        let temp_dir = std::env::temp_dir().join("vminventory_test_consultor");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let (vm1, _) = crear_vm_ejemplo();
+        let bd1 = BdRelevamiento {
+            metadatos: MetadatosRelevamiento {
+                aplicacion: "VM Inventory".to_string(),
+                fecha_relevamiento: "2026-09-07".to_string(),
+                ruta_origen: "D:\\Servidores".to_string(),
+                duracion_formateada: "00:01:00".to_string(),
+                total_vms: 1,
+                vms_exitosas: 1,
+                vms_con_observaciones: 0,
+                vms_discrepantes: 0,
+                vms_fallidas: 0,
+                total_programas: 1,
+                peso_total_gb: 40.0,
+                cancelado: false,
+            },
+            vms: vec![vm1],
+        };
+
+        // Escribimos reporte 1
+        let mut f1 = File::create(temp_dir.join("reporte1.json")).unwrap();
+        f1.write_all(serde_json::to_string(&bd1).unwrap().as_bytes())
+            .unwrap();
+
+        // Escribimos un archivo no JSON y un JSON corrupto (deben ser ignorados con gracia)
+        let mut f_txt = File::create(temp_dir.join("notas.txt")).unwrap();
+        f_txt.write_all(b"texto plano").unwrap();
+
+        let mut f_bad = File::create(temp_dir.join("corrupto.json")).unwrap();
+        f_bad.write_all(b"{ json corrupto }").unwrap();
+
+        // 1. Consulta sin filtros (debe indexar sugerencias)
+        let res_todos = consultar_software(
+            temp_dir.to_str().unwrap(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("Debe consultar software sin error");
+
+        assert_eq!(res_todos.total_archivos_json, 2); // reporte1.json y corrupto.json encontrados
+        assert_eq!(res_todos.total_vms_escaneadas, 1);
+        assert_eq!(res_todos.total_programas_indexados, 1);
+        assert!(res_todos
+            .programas_disponibles
+            .contains(&"Microsoft SQL Server 2019".to_string()));
+        assert!(res_todos
+            .vms_disponibles
+            .contains(&"SRV-SQL-PROD".to_string()));
+        assert!(res_todos
+            .tipos_disponibles
+            .contains(&"Servidores".to_string()));
+        assert!(
+            res_todos.coincidencias.is_empty(),
+            "Sin filtros no devuelve lista de coincidencias"
+        );
+
+        // 2. Consulta con filtro coincidente
+        let res_filtrado = consultar_software(
+            temp_dir.to_str().unwrap(),
+            Some("sql".to_string()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("Consulta filtrada");
+
+        assert_eq!(res_filtrado.coincidencias.len(), 1);
+        assert_eq!(
+            res_filtrado.coincidencias[0].nombre_programa,
+            "Microsoft SQL Server 2019"
+        );
+        assert_eq!(res_filtrado.coincidencias[0].nombre_vm, "SRV-SQL-PROD");
+        assert_eq!(res_filtrado.coincidencias[0].archivo_json, "reporte1.json");
+
+        // 3. Directorio inexistente retorna Error
+        let res_err = consultar_software(
+            "directorio_que_no_existe_xyz",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(res_err.is_err());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+}

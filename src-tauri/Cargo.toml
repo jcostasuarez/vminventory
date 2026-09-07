@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.1.0"
+version = "0.1.1"
 description = "VM Inventory - Relevador e inspector estático de máquinas virtuales"
 authors = ["you"]
 license = ""
