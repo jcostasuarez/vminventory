@@ -144,6 +144,36 @@ export class InspectorView {
     this.dom.containerResultadosInspector.style.display = 'flex';
     this.dom.inspectorEmptyState.style.display = 'none';
 
+    const esExito = informe.exito !== false && informe.exitosa !== false;
+    const advertencias = [...(informe.advertencias || []), ...(informe.observaciones || [])];
+
+    // 0. Renderizar bloque de advertencias / observaciones si existen o si falló
+    if (this.dom.inspectorWarningsBox) {
+      if (advertencias.length > 0 || !esExito) {
+        this.dom.inspectorWarningsBox.style.display = 'block';
+        this.dom.inspectorWarningsBox.innerHTML = `
+          <div class="inspector-card" style="border-color: ${esExito ? 'var(--warning)' : 'var(--danger)'}; background: ${esExito ? 'var(--warning-bg)' : 'var(--danger-bg)'}; margin-bottom: 14px;">
+            <div class="inspector-card-header" style="background: ${esExito ? 'rgba(245, 158, 11, 0.12)' : 'rgba(244, 63, 94, 0.12)'};">
+              <div class="inspector-card-title" style="color: ${esExito ? 'var(--warning)' : 'var(--danger)'};">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                ${esExito ? 'Observaciones de la Inspección' : 'Fallo en la Inspección de Disco'}
+              </div>
+              <span class="status-badge ${esExito ? 'idle' : 'error'}">${esExito ? 'Con Observaciones' : 'Inspección Fallida'}</span>
+            </div>
+            <div style="padding: 12px 16px; font-size: 12px; display: flex; flex-direction: column; gap: 6px;">
+              ${advertencias.length > 0
+                ? advertencias.map(a => `<div style="display: flex; gap: 8px; align-items: flex-start; color: var(--text);"><span>⚠️</span><span>${escapeHtml(a)}</span></div>`).join('')
+                : '<div style="color: var(--text);">No se pudo completar el análisis del disco virtual.</div>'
+              }
+            </div>
+          </div>
+        `;
+      } else {
+        this.dom.inspectorWarningsBox.style.display = 'none';
+        this.dom.inspectorWarningsBox.innerHTML = '';
+      }
+    }
+
     // 1. Resumen de Imagen y Rendimiento
     const img = informe.imagen || {};
     const stats = informe.estadisticas || {};
@@ -162,7 +192,7 @@ export class InspectorView {
 
     if (this.dom.lblInspFormato) this.dom.lblInspFormato.textContent = (img.formato || 'VMDK').toUpperCase();
     if (this.dom.lblInspHipervisor) this.dom.lblInspHipervisor.textContent = hipNombre;
-    if (this.dom.lblInspTamanoVirtual) this.dom.lblInspTamanoVirtual.textContent = formatearBytes(img.tamano_virtual || 0);
+    if (this.dom.lblInspTamanoVirtual) this.dom.lblInspTamanoVirtual.textContent = formatearBytes(img.tamano_virtual || img.tamano_real || 0);
     if (this.dom.lblInspTamanoReal) this.dom.lblInspTamanoReal.textContent = formatearBytes(img.tamano_real || 0);
     if (this.dom.lblInspAcceso) this.dom.lblInspAcceso.textContent = stats.modo_acceso || 'Nativo';
     if (this.dom.lblInspDuracion) this.dom.lblInspDuracion.textContent = `${stats.duracion_ms || 0} ms`;
@@ -170,7 +200,10 @@ export class InspectorView {
     if (this.dom.lblInspQemuCalls) this.dom.lblInspQemuCalls.textContent = `${stats.invocaciones_qemu || 0} llamadas`;
 
     // 2. Información del Sistema Operativo Huésped
-    const soNombre = vmInfo.os_nombre || informe.sistema_operativo || 'Desconocido';
+    let soNombre = vmInfo.os_nombre || informe.sistema_operativo || 'Desconocido';
+    if (!esExito && (soNombre === 'Desconocido' || soNombre === 'No identificado')) {
+      soNombre = 'No identificado (Fallo de inspección)';
+    }
     let soDetalle = [];
     if (vmInfo.os_edition_version) soDetalle.push(`Versión ${vmInfo.os_edition_version}`);
     if (vmInfo.os_build) soDetalle.push(`Build ${vmInfo.os_build}`);
@@ -192,7 +225,7 @@ export class InspectorView {
     if (this.dom.lblInspEsquema) this.dom.lblInspEsquema.textContent = `Tabla: ${esquema}`;
     if (this.dom.listInspParticiones) {
       if (particiones.length === 0) {
-        this.dom.listInspParticiones.innerHTML = `<div class="empty-history-text">No se detectaron particiones estructuradas.</div>`;
+        this.dom.listInspParticiones.innerHTML = `<div class="empty-history-text" style="padding: 16px;">${esExito ? 'No se detectaron particiones estructuradas.' : 'No se pudieron leer las particiones debido a errores en el disco.'}</div>`;
       } else {
         this.dom.listInspParticiones.innerHTML = particiones.map((p, idx) => {
           const fsNombre = typeof p.sistema_archivos === 'string' ? p.sistema_archivos : (p.sistema_archivos?.nombre || 'desconocido');

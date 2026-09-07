@@ -41,7 +41,16 @@ export class UIManager {
     this.cardsView = new CardsView(this.consultorCardsWrapper);
     this.graphView = new GraphView(this, (campo, valor) => {
       if (this.consultorController) {
-        this.consultorController.limpiarTodosFiltrosExcepto(campo, valor);
+        if (campo === 'programa_con_version') {
+          this.consultorController.limpiarFiltros();
+          if (this.inputBuscarPrograma) this.inputBuscarPrograma.value = valor.programa || '';
+          if (this.inputBuscarVersion) this.inputBuscarVersion.value = valor.version || '';
+          if (this.btnLimpiarPrograma) {
+            this.btnLimpiarPrograma.style.display = valor.programa ? 'block' : 'none';
+          }
+        } else {
+          this.consultorController.limpiarTodosFiltrosExcepto(campo, valor);
+        }
         if (callbacks.onEjecutarBusquedaSoftware) {
           callbacks.onEjecutarBusquedaSoftware();
         }
@@ -96,8 +105,6 @@ export class UIManager {
     this.inputBuscarVersion = document.getElementById('inputBuscarVersion');
     this.selectBuscarTipo = document.getElementById('selectBuscarTipo');
     this.inputBuscarPropietario = document.getElementById('inputBuscarPropietario');
-    this.selectBuscarSo = document.getElementById('selectBuscarSo');
-    this.selectBuscarCategoria = document.getElementById('selectBuscarCategoria');
     this.btnLimpiarPrograma = document.getElementById('btnLimpiarPrograma');
     this.btnLimpiarVm = document.getElementById('btnLimpiarVm');
     this.btnLimpiarFiltros = document.getElementById('btnLimpiarFiltros');
@@ -123,6 +130,7 @@ export class UIManager {
     this.lblEtapaInspector = document.getElementById('lblEtapaInspector');
     this.lblDetalleInspector = document.getElementById('lblDetalleInspector');
     this.containerResultadosInspector = document.getElementById('containerResultadosInspector');
+    this.inspectorWarningsBox = document.getElementById('inspectorWarningsBox');
     this.inspectorEmptyState = document.getElementById('inspectorEmptyState');
 
     this.lblInspFormato = document.getElementById('lblInspFormato');
@@ -539,8 +547,8 @@ export class UIManager {
   /**
    * Puebla los datalists del consultor con sugerencias de autocompletado.
    */
-  poblarSugerenciasSoftware(programas, vms, versiones, propietarios, categorias = [], asignados = [], elementos = []) {
-    this.consultorController.poblarSugerencias(programas, vms, versiones, propietarios, categorias, asignados, elementos);
+  poblarSugerenciasSoftware(programas, vms, versiones, propietarios, asignados = [], elementos = []) {
+    this.consultorController.poblarSugerencias(programas, vms, versiones, propietarios, asignados, elementos);
   }
 
   /**

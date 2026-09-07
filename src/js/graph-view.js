@@ -5,6 +5,7 @@
  */
 
 import { extraerInfoDisco, escapeHtml, truncarTexto } from './utils.js';
+import { deducirEntidadDesdeArchivo } from './consultor-controller.js';
 
 /**
  * @typedef {Object} GraphNode
@@ -210,26 +211,35 @@ export class GraphView {
     const nodes = new Map();
     const links = [];
 
-    // Agrupar por programas
+    // Agrupar por programa y versión para que cada versión tenga su propia tarjeta en el diagrama
     const appsMap = new Map();
     itemsProcesar.forEach(item => {
-      if (!appsMap.has(item.nombre_programa)) {
-        appsMap.set(item.nombre_programa, []);
+      const verKey = (item.version || '').trim();
+      const appKey = `${item.nombre_programa}:::${verKey}`;
+      if (!appsMap.has(appKey)) {
+        appsMap.set(appKey, {
+          nombre_programa: item.nombre_programa,
+          version: item.version || null,
+          items: []
+        });
       }
-      appsMap.get(item.nombre_programa).push(item);
+      appsMap.get(appKey).items.push(item);
     });
 
     // Construcción de Nodos y Conexiones
-    appsMap.forEach((items, appName) => {
-      const appId = `app:${appName}`;
+    appsMap.forEach((appGroup, appKey) => {
+      const { nombre_programa, version, items } = appGroup;
+      const appId = `app:${appKey}`;
       const primerItem = items[0] || {};
+      const versionTxt = version ? `v${version}` : 'Sin versión';
       nodes.set(appId, {
         id: appId,
         type: 'app',
-        title: appName,
-        subtitle: primerItem.categoria ? `${primerItem.categoria} • ${items.length} VM(s)` : `${items.length} instalación(es)`,
+        title: nombre_programa,
+        subtitle: `${versionTxt} • ${items.length} VM(s)`,
         data: {
-          nombre_programa: appName,
+          nombre_programa,
+          version,
           total: items.length,
           categoria: primerItem.categoria,
           tags: primerItem.tags || []
@@ -251,6 +261,7 @@ export class GraphView {
           item.propietario ||
           item.asignado ||
           item.elemento ||
+          deducirEntidadDesdeArchivo(item.archivo_json) ||
           'Desconocido';
 
         if (tipoLower.includes('disco')) {
@@ -601,6 +612,7 @@ export class GraphView {
           vm.propietario ||
           vm.asignado ||
           vm.elemento ||
+          deducirEntidadDesdeArchivo(vm.archivo_json) ||
           'Desconocido';
         return `
           <div class="tooltip-title">🖥️ Máquina Virtual: ${title}</div>
@@ -661,6 +673,7 @@ export class GraphView {
         vm.propietario ||
         vm.asignado ||
         vm.elemento ||
+        deducirEntidadDesdeArchivo(vm.archivo_json) ||
         'Desconocido';
       bodyHtml = `
         <div class="drawer-field-row">
@@ -739,11 +752,20 @@ export class GraphView {
         </div>
       `;
     } else if (node.type === 'app') {
+      const verBadge = node.data && node.data.version
+        ? `<span class="consultor-version-badge" style="margin-left: 6px;">v${escapeHtml(node.data.version)}</span>`
+        : '<span class="consultor-version-badge" style="margin-left: 6px; background: var(--border); color: var(--text-muted);">Sin versión</span>';
+
       bodyHtml = `
         <div class="drawer-field-row">
           <span class="drawer-field-label">Programa:</span>
-          <span class="drawer-field-value"><strong>${escapeHtml(node.title)}</strong></span>
+          <span class="drawer-field-value"><strong>${escapeHtml(node.title)}</strong> ${verBadge}</span>
         </div>
+        ${node.data && node.data.version ? `
+        <div class="drawer-field-row">
+          <span class="drawer-field-label">Versión:</span>
+          <span class="drawer-field-value"><strong>${escapeHtml(node.data.version)}</strong></span>
+        </div>` : ''}
         ${node.data && node.data.categoria ? `
         <div class="drawer-field-row">
           <span class="drawer-field-label">Categoría:</span>
@@ -759,7 +781,7 @@ export class GraphView {
           <span class="drawer-field-value">${node.data.total} máquina(s) virtual(es)</span>
         </div>
         <div class="drawer-actions">
-          <button class="step-action-btn ready-to-run btn-filtrar-nodo-app" type="button" style="flex: 1; height: 32px; font-size: 11px;" title="Filtrar solo por este Programa">
+          <button class="step-action-btn ready-to-run btn-filtrar-nodo-app" type="button" style="flex: 1; height: 32px; font-size: 11px;" title="Filtrar solo por este Programa y Versión">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             Filtrar solo por este Programa
           </button>
@@ -803,13 +825,16 @@ export class GraphView {
     const btnFiltrarVm = this.drawerBody.querySelector('.btn-filtrar-nodo-vm');
     if (btnFiltrarVm && this.onFiltrarCallback) {
       btnFiltrarVm.addEventListener('click', () => {
-        this.onFiltrarCallback('vm', node.title);
+        if (this.drawer) this.drawer.style.display = 'none';
+        const vmName = (node.data && node.data.nombre_vm) ? node.data.nombre_vm : node.title;
+        this.onFiltrarCallback('vm', vmName);
       });
     }
 
     const btnFiltrarProp = this.drawerBody.querySelector('.btn-filtrar-nodo-propietario');
     if (btnFiltrarProp && this.onFiltrarCallback) {
       btnFiltrarProp.addEventListener('click', () => {
+        if (this.drawer) this.drawer.style.display = 'none';
         this.onFiltrarCallback('propietario', node.title);
       });
     }
@@ -817,13 +842,22 @@ export class GraphView {
     const btnFiltrarApp = this.drawerBody.querySelector('.btn-filtrar-nodo-app');
     if (btnFiltrarApp && this.onFiltrarCallback) {
       btnFiltrarApp.addEventListener('click', () => {
-        this.onFiltrarCallback('programa', node.title);
+        if (this.drawer) this.drawer.style.display = 'none';
+        if (node.data && node.data.version) {
+          this.onFiltrarCallback('programa_con_version', {
+            programa: node.data.nombre_programa || node.title,
+            version: node.data.version
+          });
+        } else {
+          this.onFiltrarCallback('programa', node.title);
+        }
       });
     }
 
     const btnFiltrarGen = this.drawerBody.querySelector('.btn-filtrar-nodo-generico');
     if (btnFiltrarGen && this.onFiltrarCallback) {
       btnFiltrarGen.addEventListener('click', () => {
+        if (this.drawer) this.drawer.style.display = 'none';
         this.onFiltrarCallback('propietario', node.title);
       });
     }

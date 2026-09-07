@@ -63,8 +63,8 @@ describe('Vista de Tarjetas (cards-view.js)', () => {
     const personaItem = {
       ...mockCoincidencia,
       tipo_posesion: 'Personas',
-      elemento_asignado: 'Juan Perez',
-      ruta_carpeta: 'C:\\Users\\Juan\\VM'
+      elemento_asignado: 'Operador Dev',
+      ruta_carpeta: 'C:\\Users\\DevUser\\VM'
     };
 
     const discoItem = {

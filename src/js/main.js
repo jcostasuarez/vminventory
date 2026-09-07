@@ -50,8 +50,6 @@ async function ejecutarConsultaSoftware() {
   const queryVer = ui.inputBuscarVersion ? ui.inputBuscarVersion.value.trim() : '';
   const queryTipo = ui.selectBuscarTipo ? ui.selectBuscarTipo.value : 'todos';
   const queryProp = ui.inputBuscarPropietario ? ui.inputBuscarPropietario.value.trim() : '';
-  const querySo = ui.selectBuscarSo ? ui.selectBuscarSo.value : 'todos';
-  const queryCat = ui.selectBuscarCategoria ? ui.selectBuscarCategoria.value : 'todas';
 
   if (ui.btnRecargarSoftware) {
     ui.btnRecargarSoftware.classList.add('spinning');
@@ -64,9 +62,7 @@ async function ejecutarConsultaSoftware() {
       filtroVm: queryVm || null,
       filtroVersion: queryVer || null,
       filtroTipo: queryTipo && queryTipo !== 'todos' ? queryTipo : null,
-      filtroPropietario: queryProp || null,
-      filtroSo: querySo && querySo !== 'todos' ? querySo : null,
-      filtroCategoria: queryCat && queryCat !== 'todas' ? queryCat : null
+      filtroPropietario: queryProp || null
     });
 
     // Descartar si una búsqueda posterior ya fue emitida
@@ -80,7 +76,6 @@ async function ejecutarConsultaSoftware() {
         resultado.vms_disponibles,
         resultado.versiones_disponibles,
         resultado.propietarios_disponibles,
-        resultado.categorias_disponibles || [],
         resultado.asignados_disponibles || [],
         resultado.elementos_disponibles || []
       );
@@ -91,9 +86,7 @@ async function ejecutarConsultaSoftware() {
           vm: queryVm,
           version: queryVer,
           tipo: queryTipo,
-          propietario: queryProp,
-          so: querySo,
-          categoria: queryCat
+          propietario: queryProp
         },
         async (ruta) => {
           try {
@@ -477,18 +470,6 @@ camposDeBusqueda.forEach(input => {
 
 if (ui.selectBuscarTipo) {
   ui.selectBuscarTipo.addEventListener('change', () => {
-    ejecutarConsultaSoftware();
-  });
-}
-
-if (ui.selectBuscarSo) {
-  ui.selectBuscarSo.addEventListener('change', () => {
-    ejecutarConsultaSoftware();
-  });
-}
-
-if (ui.selectBuscarCategoria) {
-  ui.selectBuscarCategoria.addEventListener('change', () => {
     ejecutarConsultaSoftware();
   });
 }

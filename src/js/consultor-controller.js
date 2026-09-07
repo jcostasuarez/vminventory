@@ -7,6 +7,28 @@
 import { escapeHtml } from './utils.js';
 
 /**
+ * Deduce el nombre de la entidad (persona, disco o servidor) a partir del nombre del archivo JSON de reporte.
+ *
+ * @param {string|null} archivo - Nombre de archivo o ruta JSON (ej: "Operador_Alpha.json", "Nivel_1_Disco_2.json").
+ * @returns {string|null} Nombre formateado o null si es genérico.
+ */
+export function deducirEntidadDesdeArchivo(archivo) {
+  if (!archivo) return null;
+  const base = String(archivo).split(/[/\\]/).pop() || '';
+  const stem = base.replace(/\.json$/i, '').trim();
+  if (
+    !stem ||
+    stem.toLowerCase() === 'reporte' ||
+    stem.toLowerCase() === 'informe' ||
+    stem.toLowerCase() === 'vms' ||
+    stem.toLowerCase() === 'inventario'
+  ) {
+    return null;
+  }
+  return stem.replace(/_/g, ' ').trim() || null;
+}
+
+/**
  * Sanitiza una cadena eliminando espacios y filtrando valores inválidos como null, undefined, '-' o cadenas vacías.
  *
  * @param {*} val - Valor a sanitizar.
@@ -42,7 +64,11 @@ export function extraerOpcionesFiltros(listaVMs = []) {
     if (vm.asignado) return sanitizarTexto(vm.asignado);
     const cat = (vm.origen_categoria || vm.tipo_posesion || '').toLowerCase();
     if (cat.includes('persona')) {
-      return sanitizarTexto(vm.propietario || vm.elemento_asignado);
+      return (
+        sanitizarTexto(vm.propietario) ||
+        sanitizarTexto(vm.elemento_asignado) ||
+        deducirEntidadDesdeArchivo(vm.archivo_json)
+      );
     }
     return null;
   });
@@ -52,14 +78,24 @@ export function extraerOpcionesFiltros(listaVMs = []) {
     if (vm.elemento) return sanitizarTexto(vm.elemento);
     const cat = (vm.origen_categoria || vm.tipo_posesion || '').toLowerCase();
     if (!cat.includes('persona')) {
-      return sanitizarTexto(vm.elemento_asignado || vm.propietario);
+      return (
+        sanitizarTexto(vm.elemento_asignado) ||
+        sanitizarTexto(vm.propietario) ||
+        deducirEntidadDesdeArchivo(vm.archivo_json)
+      );
     }
     return null;
   });
 
   const propietariosRaw = listaVMs.map((vm) => {
     if (!vm) return null;
-    return sanitizarTexto(vm.elemento_asignado || vm.propietario || vm.asignado || vm.elemento);
+    return (
+      sanitizarTexto(vm.elemento_asignado) ||
+      sanitizarTexto(vm.propietario) ||
+      sanitizarTexto(vm.asignado) ||
+      sanitizarTexto(vm.elemento) ||
+      deducirEntidadDesdeArchivo(vm.archivo_json)
+    );
   });
 
   const opcionesAsignado = [...new Set(asignadosRaw.filter(Boolean))].sort();
@@ -95,6 +131,14 @@ export function filtrarVirtuales(listaVMs = [], filtros = {}) {
   if (!Array.isArray(listaVMs)) return [];
 
   const norm = (s) => (s ? String(s).trim().toLowerCase() : '');
+  const coincideTexto = (val, q) => {
+    if (!val || !q) return false;
+    const v = norm(val);
+    const qEsp = q.replace(/_/g, ' ');
+    const vEsp = v.replace(/_/g, ' ');
+    return v.includes(q) || v.includes(qEsp) || vEsp.includes(q) || vEsp.includes(qEsp);
+  };
+
   const qProg = norm(filtros.programa);
   const qVm = norm(filtros.vm);
   const qVer = norm(filtros.version);
@@ -109,23 +153,25 @@ export function filtrarVirtuales(listaVMs = [], filtros = {}) {
   return listaVMs.filter((item) => {
     if (!item) return false;
 
-    // 1. Programa o tags
+    // 1. Programa, editor o tags
     if (qProg) {
-      const nombreOk = norm(item.nombre_programa || item.nombre).includes(qProg);
-      const tagsOk = Array.isArray(item.tags) && item.tags.some((t) => norm(t).includes(qProg));
+      const nombreOk = coincideTexto(item.nombre_programa || item.nombre, qProg);
+      const editorOk = coincideTexto(item.editor, qProg);
+      const tagsOk = Array.isArray(item.tags) && item.tags.some((t) => coincideTexto(t, qProg));
       const progsOk = Array.isArray(item.programas) && item.programas.some((p) => {
-        const pNom = norm(p.nombre).includes(qProg);
-        const pTags = Array.isArray(p.tags) && p.tags.some((t) => norm(t).includes(qProg));
-        return pNom || pTags;
+        const pNom = coincideTexto(p.nombre, qProg);
+        const pEd = coincideTexto(p.editor, qProg);
+        const pTags = Array.isArray(p.tags) && p.tags.some((t) => coincideTexto(t, qProg));
+        return pNom || pEd || pTags;
       });
-      if (!nombreOk && !tagsOk && !progsOk) return false;
+      if (!nombreOk && !editorOk && !tagsOk && !progsOk) return false;
     }
 
     // 2. Máquina Virtual (nombre_vm, nombre_interno, ruta_carpeta)
     if (qVm) {
-      const vmOk = norm(item.nombre_vm).includes(qVm);
-      const intOk = norm(item.nombre_interno).includes(qVm);
-      const rutaOk = norm(item.ruta_carpeta).includes(qVm);
+      const vmOk = coincideTexto(item.nombre_vm, qVm);
+      const intOk = coincideTexto(item.nombre_interno, qVm);
+      const rutaOk = coincideTexto(item.ruta_carpeta, qVm);
       if (!vmOk && !intOk && !rutaOk) return false;
     }
 
@@ -144,36 +190,57 @@ export function filtrarVirtuales(listaVMs = [], filtros = {}) {
 
     // 5. Asignado / Elemento genérico (propietario)
     if (qProp) {
-      const p1 = norm(item.propietario).includes(qProp);
-      const p2 = norm(item.elemento_asignado).includes(qProp);
-      const p3 = norm(item.asignado).includes(qProp);
-      const p4 = norm(item.elemento).includes(qProp);
-      if (!p1 && !p2 && !p3 && !p4) return false;
+      const entidad = deducirEntidadDesdeArchivo(item.archivo_json);
+      const p1 = coincideTexto(item.propietario, qProp);
+      const p2 = coincideTexto(item.elemento_asignado, qProp);
+      const p3 = coincideTexto(item.asignado, qProp);
+      const p4 = coincideTexto(item.elemento, qProp);
+      const p5 = coincideTexto(entidad, qProp);
+      if (!p1 && !p2 && !p3 && !p4 && !p5) return false;
     }
 
     // 6. Asignado específico (Personas)
     if (qAsig) {
-      const asigVal = norm(item.asignado || item.propietario || item.elemento_asignado);
-      if (!asigVal.includes(qAsig)) return false;
+      const entidad = deducirEntidadDesdeArchivo(item.archivo_json);
+      const asigVal = item.asignado || item.propietario || item.elemento_asignado || entidad;
+      if (!coincideTexto(asigVal, qAsig)) return false;
     }
 
     // 7. Elemento específico (Discos / Servidores)
     if (qElem) {
-      const elemVal = norm(item.elemento || item.elemento_asignado || item.propietario);
-      if (!elemVal.includes(qElem)) return false;
+      const entidad = deducirEntidadDesdeArchivo(item.archivo_json);
+      const elemVal = item.elemento || item.elemento_asignado || item.propietario || entidad;
+      if (!coincideTexto(elemVal, qElem)) return false;
     }
 
     // 8. Sistema Operativo
     if (qSo && qSo !== 'todos') {
       const soVal = norm(item.sistema_operativo);
-      if (!soVal.includes(qSo)) return false;
+      if (qSo === 'windows' || qSo === 'win') {
+        if (!soVal.includes('win')) return false;
+      } else if (qSo === 'linux' || qSo === 'lin') {
+        const isLinux =
+          soVal.includes('linux') ||
+          soVal.includes('ubuntu') ||
+          soVal.includes('debian') ||
+          soVal.includes('centos') ||
+          soVal.includes('redhat') ||
+          soVal.includes('rhel') ||
+          soVal.includes('fedora') ||
+          soVal.includes('suse') ||
+          soVal.includes('arch') ||
+          soVal.includes('alpine');
+        if (!isLinux) return false;
+      } else {
+        if (!soVal.includes(qSo)) return false;
+      }
     }
 
     // 9. Categoría funcional
     if (qCat && qCat !== 'todas') {
       const catVal = norm(item.categoria);
-      const progCatOk = Array.isArray(item.programas) && item.programas.some((p) => norm(p.categoria) === qCat);
-      if (catVal !== qCat && !progCatOk) return false;
+      const progCatOk = Array.isArray(item.programas) && item.programas.some((p) => norm(p.categoria).includes(qCat));
+      if (!catVal.includes(qCat) && !progCatOk) return false;
     }
 
     // 10. Discrepantes
@@ -296,8 +363,6 @@ export class ConsultorController {
     if (this.dom.inputBuscarVersion) this.dom.inputBuscarVersion.value = '';
     if (this.dom.selectBuscarTipo) this.dom.selectBuscarTipo.value = 'todos';
     if (this.dom.inputBuscarPropietario) this.dom.inputBuscarPropietario.value = '';
-    if (this.dom.selectBuscarSo) this.dom.selectBuscarSo.value = 'todos';
-    if (this.dom.selectBuscarCategoria) this.dom.selectBuscarCategoria.value = 'todas';
     if (this.dom.btnLimpiarPrograma) this.dom.btnLimpiarPrograma.style.display = 'none';
     if (this.dom.btnLimpiarVm) this.dom.btnLimpiarVm.style.display = 'none';
   }
@@ -305,17 +370,15 @@ export class ConsultorController {
   /**
    * Limpia todos los filtros y establece únicamente el valor del campo especificado.
    *
-   * @param {'programa'|'vm'|'version'|'propietario'|'categoria'} campo - Nombre del campo a preservar.
+   * @param {'programa'|'vm'|'version'|'propietario'|'tipo'} campo - Nombre del campo a preservar.
    * @param {string} valor - Valor a asignar.
    */
   limpiarTodosFiltrosExcepto(campo, valor) {
     if (this.dom.inputBuscarPrograma) this.dom.inputBuscarPrograma.value = campo === 'programa' ? valor : '';
     if (this.dom.inputBuscarVm) this.dom.inputBuscarVm.value = campo === 'vm' ? valor : '';
     if (this.dom.inputBuscarVersion) this.dom.inputBuscarVersion.value = campo === 'version' ? valor : '';
-    if (this.dom.selectBuscarTipo) this.dom.selectBuscarTipo.value = 'todos';
+    if (this.dom.selectBuscarTipo) this.dom.selectBuscarTipo.value = campo === 'tipo' ? valor : 'todos';
     if (this.dom.inputBuscarPropietario) this.dom.inputBuscarPropietario.value = campo === 'propietario' ? valor : '';
-    if (this.dom.selectBuscarSo) this.dom.selectBuscarSo.value = 'todos';
-    if (this.dom.selectBuscarCategoria) this.dom.selectBuscarCategoria.value = campo === 'categoria' ? valor : 'todas';
     if (this.dom.btnLimpiarPrograma) {
       this.dom.btnLimpiarPrograma.style.display = this.dom.inputBuscarPrograma && this.dom.inputBuscarPrograma.value ? 'block' : 'none';
     }
@@ -329,9 +392,8 @@ export class ConsultorController {
    *
    * @param {string[]} [programas=[]] - Lista de programas disponibles.
    * @param {string[]} [vms=[]] - Lista de VMs disponibles.
-   * @param {string[]} [versiones=[]] - Lista de versiones registradas.
+   * @param {string[]} [versiones=[]] - Lista de versiones registradas (filtradas contextualmente).
    * @param {string[]} [propietarios=[]] - Lista de colaboradores y elementos.
-   * @param {string[]} [categorias=[]] - Lista de categorías funcionales de vminspect-rs.
    * @param {string[]} [asignados=[]] - Lista de personas asignadas.
    * @param {string[]} [elementos=[]] - Lista de elementos físicos/servidores.
    * @returns {void}
@@ -341,7 +403,6 @@ export class ConsultorController {
     vms = [],
     versiones = [],
     propietarios = [],
-    categorias = [],
     asignados = [],
     elementos = []
   ) {
@@ -375,18 +436,6 @@ export class ConsultorController {
         .map(u => `<option value="${escapeHtml(u)}">`)
         .join('');
     }
-    if (this.dom.selectBuscarCategoria && categorias.length > 0) {
-      const valorActual = this.dom.selectBuscarCategoria.value;
-      const catsSanitizadas = sanitizarLista(categorias);
-      const opts = [
-        '<option value="todas">🏷️ Todas las Categorías</option>',
-        ...catsSanitizadas.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
-      ];
-      this.dom.selectBuscarCategoria.innerHTML = opts.join('');
-      if (catsSanitizadas.includes(valorActual)) {
-        this.dom.selectBuscarCategoria.value = valorActual;
-      }
-    }
   }
 
   /**
@@ -405,17 +454,13 @@ export class ConsultorController {
     const queryVer = (filtros.version || '').trim();
     const queryProp = (filtros.propietario || '').trim();
     const queryTipo = (filtros.tipo || 'todos');
-    const querySo = (filtros.so || 'todos');
-    const queryCat = (filtros.categoria || 'todas');
 
     const hayFiltroActivo = Boolean(
       queryProg ||
       queryVm ||
       queryProp ||
       (queryTipo && queryTipo !== 'todos') ||
-      queryVer ||
-      (querySo && querySo !== 'todos') ||
-      (queryCat && queryCat !== 'todas')
+      queryVer
     );
 
     // Caso 1: Sin base de datos configurada o sin reportes

@@ -3,6 +3,7 @@
 
 mod clasificacion;
 mod commands;
+pub mod consultor;
 mod models;
 mod relevamiento;
 

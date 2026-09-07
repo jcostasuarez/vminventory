@@ -6,6 +6,7 @@
  */
 
 import { extraerInfoDisco, escapeHtml } from './utils.js';
+import { deducirEntidadDesdeArchivo } from './consultor-controller.js';
 
 const TAMANO_PAGINA = 50;
 
@@ -200,6 +201,7 @@ export class CardsView {
       item.propietario ||
       item.asignado ||
       item.elemento ||
+      deducirEntidadDesdeArchivo(item.archivo_json) ||
       'Desconocido';
     const posesionTag = `
       <span class="consultor-possession-badge ${tagCls}" title="Ubicación y tenencia asignada">

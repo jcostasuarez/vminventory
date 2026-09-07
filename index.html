@@ -384,28 +384,9 @@
                 <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
                 </svg>
-                <input type="text" id="inputBuscarPropietario" class="form-input search-field" list="datalistPropietarios" placeholder="Ej: Juan Costa Suarez, Disco 01..." autocomplete="off" />
+                <input type="text" id="inputBuscarPropietario" class="form-input search-field" list="datalistPropietarios" placeholder="Ej: Operador Alpha, Disco 01..." autocomplete="off" />
               </div>
               <datalist id="datalistPropietarios"></datalist>
-            </div>
-          </div>
-
-          <!-- Fila 4: Categoría Funcional y Sistema Operativo -->
-          <div class="consultor-search-row">
-            <div class="consultor-input-group flex-tipo">
-              <label class="form-label" for="selectBuscarCategoria">Categoría Funcional (vminspect-rs):</label>
-              <select id="selectBuscarCategoria" class="form-input">
-                <option value="todas">🏷️ Todas las Categorías</option>
-              </select>
-            </div>
-
-            <div class="consultor-input-group flex-owner">
-              <label class="form-label" for="selectBuscarSo">Sistema Operativo Huésped:</label>
-              <select id="selectBuscarSo" class="form-input">
-                <option value="todos">🌐 Todos los Sistemas</option>
-                <option value="windows">🪟 Windows</option>
-                <option value="linux">🐧 Linux</option>
-              </select>
             </div>
           </div>
         </div>
@@ -594,6 +575,9 @@
       <!-- Contenedor de Resultados del Inspector de VM -->
       <div class="inspector-results-wrapper" id="containerResultadosInspector" style="display: none;">
         
+        <!-- Bloque de Advertencias y Observaciones del Disco -->
+        <div id="inspectorWarningsBox" style="display: none;"></div>
+
         <!-- Fila 1: Tarjetas de Información de Disco y SO -->
         <div class="inspector-grid-two-col">
           <!-- Tarjeta 1: Parámetros y Geometría de Imagen -->

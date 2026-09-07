@@ -1,11 +1,14 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { setupDomEnvironment, MockElement } from '../helpers/dom-helper.js';
 import {
   ConsultorController,
   sanitizarTexto,
   extraerOpcionesFiltros,
-  filtrarVirtuales
+  filtrarVirtuales,
+  deducirEntidadDesdeArchivo
 } from '../../src/js/consultor-controller.js';
 
 describe('Controlador del Consultor de Software (consultor-controller.js)', () => {
@@ -16,15 +19,15 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
   // Mock de datos simulando la estructura jerárquica unificada (Personas, Discos, Servidores)
   const mockVMsJerarquia = [
     {
-      nombre_vm: 'Win11-Dev-Juan',
+      nombre_vm: 'Win11-Dev-Alpha',
       nombre_interno: 'Win11-Dev',
-      ruta_carpeta: 'C:\\Relevamientos_VMs\\Personas\\Juan Costa\\Win11',
+      ruta_carpeta: 'C:\\Relevamientos_VMs\\Personas\\Operador_Alpha\\Win11',
       origen_categoria: 'Personas',
       tipo_posesion: 'Personas',
-      asignado: 'Juan Costa Suarez',
+      asignado: 'Operador Alpha',
       elemento: null,
-      propietario: 'Juan Costa Suarez',
-      elemento_asignado: 'Juan Costa Suarez',
+      propietario: 'Operador Alpha',
+      elemento_asignado: 'Operador Alpha',
       sistema_operativo: 'Windows 11 Enterprise',
       categoria: 'Desarrollo',
       discrepante: false,
@@ -137,7 +140,7 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
 
   describe('sanitizarTexto() y extraerOpcionesFiltros()', () => {
     it('debe sanitizar cadenas descartando null, undefined, "-" y espacios en blanco', () => {
-      assert.equal(sanitizarTexto('  Juan Costa  '), 'Juan Costa');
+      assert.equal(sanitizarTexto('  Operador Alpha  '), 'Operador Alpha');
       assert.equal(sanitizarTexto(''), null);
       assert.equal(sanitizarTexto('   '), null);
       assert.equal(sanitizarTexto('-'), null);
@@ -150,21 +153,21 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
     it('debe extraer opciones únicas para Asignado y Elemento sin colar valores inválidos', () => {
       const { opcionesAsignado, opcionesElemento, opcionesPropietario } = extraerOpcionesFiltros(mockVMsJerarquia);
 
-      assert.deepEqual(opcionesAsignado, ['Juan Costa Suarez']);
+      assert.deepEqual(opcionesAsignado, ['Operador Alpha']);
       assert.deepEqual(opcionesElemento, ['Cluster Principal ESXi', 'Disco 01 Externo']);
       assert.ok(!opcionesAsignado.includes('-'));
       assert.ok(!opcionesAsignado.includes('null'));
       assert.ok(!opcionesElemento.includes('undefined'));
-      assert.ok(opcionesPropietario.includes('Juan Costa Suarez'));
+      assert.ok(opcionesPropietario.includes('Operador Alpha'));
       assert.ok(opcionesPropietario.includes('Cluster Principal ESXi'));
     });
   });
 
   describe('filtrarVirtuales() - Lógica AND y Normalización de Cadenas', () => {
     it('debe filtrar por Asignado con normalización case-insensitive y espacios', () => {
-      const res = filtrarVirtuales(mockVMsJerarquia, { asignado: '  juan costa  ' });
+      const res = filtrarVirtuales(mockVMsJerarquia, { asignado: '  operador alpha  ' });
       assert.equal(res.length, 1);
-      assert.equal(res[0].nombre_vm, 'Win11-Dev-Juan');
+      assert.equal(res[0].nombre_vm, 'Win11-Dev-Alpha');
     });
 
     it('debe filtrar por Elemento en Discos y Servidores', () => {
@@ -181,7 +184,7 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
       // Coincide todo
       const match = filtrarVirtuales(mockVMsJerarquia, {
         tipo: 'Personas',
-        asignado: 'Juan',
+        asignado: 'Operador',
         programa: 'visual studio',
         so: 'windows'
       });
@@ -190,7 +193,7 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
       // Falla por SO
       const noMatchSo = filtrarVirtuales(mockVMsJerarquia, {
         tipo: 'Personas',
-        asignado: 'Juan',
+        asignado: 'Operador',
         programa: 'visual studio',
         so: 'linux'
       });
@@ -199,7 +202,7 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
       // Falla por Tipo
       const noMatchTipo = filtrarVirtuales(mockVMsJerarquia, {
         tipo: 'Servidores',
-        asignado: 'Juan'
+        asignado: 'Operador'
       });
       assert.equal(noMatchTipo.length, 0);
     });
@@ -221,14 +224,12 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
       dom.inputBuscarPrograma.value = 'Oracle';
       dom.inputBuscarVm.value = 'SRV-01';
       dom.selectBuscarTipo.value = 'Servidores';
-      dom.selectBuscarCategoria.value = 'Bases de datos';
 
       controller.limpiarFiltros();
 
       assert.equal(dom.inputBuscarPrograma.value, '');
       assert.equal(dom.inputBuscarVm.value, '');
       assert.equal(dom.selectBuscarTipo.value, 'todos');
-      assert.equal(dom.selectBuscarCategoria.value, 'todas');
     });
 
     it('debe preservar solo el campo especificado con limpiarTodosFiltrosExcepto()', () => {
@@ -251,9 +252,8 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
         ['Node.js', 'PostgreSQL', ' - ', null],
         ['SRV-WEB', 'SRV-DB', ''],
         ['18.0', '15.0', 'undefined'],
-        ['Juan', 'Maria', '-'],
-        ['Desarrollo', 'Bases de datos'],
-        ['Juan Costa'],
+        ['Operador A', 'Operador B', '-'],
+        ['Operador Alpha'],
         ['Disco 01', 'Cluster A']
       );
 
@@ -262,9 +262,8 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
       assert.ok(dom.datalistVms.innerHTML.includes('SRV-WEB'));
       assert.ok(dom.datalistVersiones.innerHTML.includes('18.0'));
       assert.ok(!dom.datalistVersiones.innerHTML.includes('undefined'));
-      assert.ok(dom.datalistPropietarios.innerHTML.includes('Juan Costa'));
+      assert.ok(dom.datalistPropietarios.innerHTML.includes('Operador Alpha'));
       assert.ok(dom.datalistPropietarios.innerHTML.includes('Cluster A'));
-      assert.ok(dom.selectBuscarCategoria.innerHTML.includes('Desarrollo'));
     });
 
     it('debe gestionar los 4 estados de renderResultados()', () => {
@@ -309,6 +308,86 @@ describe('Controlador del Consultor de Software (consultor-controller.js)', () =
       assert.equal(dom.btnVistaDiagrama.disabled, false);
       assert.ok(views.cardsView.renderCalled);
       assert.ok(views.graphView.renderCalled);
+    });
+  });
+
+  describe('Integración y deducción de reportes unificados (Personas, Discos, Servidores)', () => {
+    it('debe deducir entidades desde nombres de archivo JSON correctamente', () => {
+      assert.equal(deducirEntidadDesdeArchivo('Operador_Alpha.json'), 'Operador Alpha');
+      assert.equal(deducirEntidadDesdeArchivo('Nivel_1_Disco_2.json'), 'Nivel 1 Disco 2');
+      assert.equal(deducirEntidadDesdeArchivo('Informe_Inspeccion_VM.json'), 'Informe Inspeccion VM');
+      assert.equal(deducirEntidadDesdeArchivo('reporte.json'), null);
+      assert.equal(deducirEntidadDesdeArchivo(''), null);
+    });
+
+    it('debe filtrar y extraer opciones a partir de datasets simulados de reportes', () => {
+      const vmsPersonas = [
+        {
+          nombre_vm: 'Dev-Box-01',
+          ruta_carpeta: 'C:\\Personas\\Operador Alpha\\DevBox',
+          sistema_operativo: 'Windows 11 Pro',
+          origen_categoria: 'Personas',
+          tipo_posesion: 'Personas',
+          archivo_json: 'Operador_Alpha.json',
+          programas: [{ nombre: 'Visual Studio Code', version: '1.85.0', categoria: 'Desarrollo' }],
+          discrepante: false,
+          exitosa: true
+        }
+      ];
+
+      const vmsDiscos = [
+        {
+          nombre_vm: 'Backup-Node',
+          ruta_carpeta: 'E:\\Discos\\Nivel 1 Disco 2\\Backup',
+          sistema_operativo: 'Debian 12',
+          origen_categoria: 'Discos',
+          tipo_posesion: 'Discos',
+          archivo_json: 'Nivel_1_Disco_2.json',
+          programas: [{ nombre: 'PostgreSQL Server', version: '16.1', categoria: 'Bases de datos' }],
+          discrepante: false,
+          exitosa: true
+        }
+      ];
+
+      const vmServidor = {
+        nombre_vm: 'SRV-PROD-APP',
+        ruta_carpeta: 'C:\\Servidores\\AppServer',
+        sistema_operativo: 'Windows Server 2022',
+        origen_categoria: 'Servidores',
+        tipo_posesion: 'Servidores',
+        archivo_json: 'Informe_Inspeccion_VM.json',
+        programas: [{ nombre: 'Web Application Server', version: '10.1', categoria: 'Servidores web' }],
+        discrepante: false,
+        exitosa: true
+      };
+
+      const todasVMs = [...vmsPersonas, ...vmsDiscos, vmServidor];
+      assert.equal(todasVMs.length, 3);
+
+      // 1. Extraer opciones
+      const opciones = extraerOpcionesFiltros(todasVMs);
+      assert.ok(opciones.opcionesAsignado.includes('Operador Alpha'));
+      assert.ok(opciones.opcionesElemento.includes('Nivel 1 Disco 2'));
+      assert.ok(opciones.opcionesElemento.includes('Informe Inspeccion VM'));
+      assert.ok(opciones.opcionesPropietario.includes('Operador Alpha'));
+
+      // 2. Filtro por Persona "Operador Alpha"
+      const resPersona = filtrarVirtuales(todasVMs, { propietario: 'Operador Alpha' });
+      assert.equal(resPersona.length, 1);
+      assert.equal(resPersona[0].nombre_vm, 'Dev-Box-01');
+
+      // 3. Filtro por Programa "PostgreSQL"
+      const resProg = filtrarVirtuales(todasVMs, { programa: 'PostgreSQL' });
+      assert.equal(resProg.length, 1);
+      assert.equal(resProg[0].nombre_vm, 'Backup-Node');
+
+      // 4. Filtro por Elemento "Nivel 1 Disco 2"
+      const resDisco = filtrarVirtuales(todasVMs, { elemento: 'Nivel 1 Disco 2' });
+      assert.equal(resDisco.length, 1);
+
+      // 5. Filtro por SO "Windows"
+      const resWin = filtrarVirtuales(todasVMs, { so: 'windows' });
+      assert.equal(resWin.length, 2);
     });
   });
 });

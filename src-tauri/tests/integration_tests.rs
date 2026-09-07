@@ -106,12 +106,12 @@ fn test_ciclo_completo_persistencia_y_consulta_software() {
         "vms": [
             {
                 "exitosa": true,
-                "nombre_vm": "PC-JuanPerez",
+                "nombre_vm": "PC-DevUser",
                 "nombre_interno": "Win11-Dev",
-                "ruta_carpeta": "E:\\Personas\\JuanPerez\\VM",
-                "propietario": "Juan Perez",
+                "ruta_carpeta": "E:\\Personas\\DevUser\\VM",
+                "propietario": "Dev User",
                 "tipo_posesion": "Personas",
-                "elemento_asignado": "Juan Perez",
+                "elemento_asignado": "Dev User",
                 "sistema_operativo": "Windows 11 Enterprise",
                 "hipervisor": "VirtualBox",
                 "peso_gb": 30.0,

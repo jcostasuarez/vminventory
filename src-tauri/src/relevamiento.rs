@@ -821,7 +821,7 @@ fn inspeccionar_vm(
                 let _ = tx_res.send(res);
             });
 
-        let timeout = std::time::Duration::from_secs(5);
+        let timeout = std::time::Duration::from_secs(60);
         let mut ultima_actividad = Instant::now();
         let resultado = loop {
             if supervision.cancelada() {
@@ -850,7 +850,7 @@ fn inspeccionar_vm(
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     if ultima_actividad.elapsed() > timeout {
                         observaciones.push(format!(
-                            "Timeout de I/O (5s) excedido al intentar leer particiones o registros (Windows\\System32\\config) en {}",
+                            "Timeout de I/O (60s) excedido al intentar leer particiones o registros (Windows\\System32\\config) en {}",
                             disco.display()
                         ));
                         break Err(VmSpectError::Other(
@@ -1081,7 +1081,7 @@ mod tests {
             Some("Discos".to_string())
         );
         assert_eq!(
-            deducir_tipo_posesion(Path::new("D:\\JuanPerez\\VM3")),
+            deducir_tipo_posesion(Path::new("D:\\OperadorDev\\VM3")),
             Some("Personas".to_string())
         );
     }
