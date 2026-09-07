@@ -1,0 +1,61 @@
+# =============================================================================
+# VM Inventory - .gitignore
+# =============================================================================
+
+# --- Node.js & Frontend ---
+node_modules/
+dist/
+dist-ssr/
+.pnp
+.pnp.js
+coverage/
+*.local
+
+# --- Rust & Cargo ---
+/target/
+src-tauri/target/
+**/*.rs.bk
+*.pdb
+
+# --- Tauri Generated ---
+src-tauri/gen/schemas/
+src-tauri/gen/
+
+# --- Environment & Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Logs & Runtime ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Editor & IDE Directories ---
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.suo
+*.user
+*.userosv
+*.sln.docstates
+*.swp
+*.swo
+*~
+
+# --- Operating System Files ---
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini

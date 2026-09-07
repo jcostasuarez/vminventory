@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <title>VM Inventory | Relevador de VMs</title>
+  <link rel="stylesheet" href="/src/styles/app.css" />
+</head>
+<body>
+  <!-- Custom Modern Titlebar con Selector de Herramientas -->
+  <header class="titlebar" id="customTitlebar" data-tauri-drag-region>
+    <div class="titlebar-drag-area" data-tauri-drag-region>
+      <div class="titlebar-logo" data-tauri-drag-region>
+        <div class="titlebar-logo-badge">VM</div>
+        <span>Relevador de VMs</span>
+      </div>
+
+      <!-- Pestañas Principales: Analizador, Consultor e Inspector de VM -->
+      <nav class="titlebar-tools-tabs" data-tauri-drag-region>
+        <button class="tool-tab-btn active" id="tabBtnAnalizador" type="button" title="Herramienta de análisis y relevamiento masivo de máquinas virtuales">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          <span>Analizador</span>
+        </button>
+        <button class="tool-tab-btn" id="tabBtnConsultor" type="button" title="Herramienta de consulta y localización de software en máquinas virtuales">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <span>Consultor</span>
+        </button>
+        <button class="tool-tab-btn" id="tabBtnInspector" type="button" title="Inspección estática directa de discos virtuales (.vmdk, .vdi, .vhdx, .raw) con vminspect-rs">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <ellipse cx="12" cy="5" rx="9" ry="3"/>
+            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+          </svg>
+          <span>Inspector de VM</span>
+        </button>
+      </nav>
+    </div>
+
+    <!-- Navegación Rápida: Historial (Analizador), Configuración & Modo Claro/Oscuro -->
+    <div class="titlebar-nav-btns">
+      <button class="nav-btn" id="btnOpenHistorial" title="Ver historial de relevamientos realizados">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Historial
+      </button>
+      <button class="nav-btn" id="btnOpenAjustes" title="Configuración de la herramienta actual">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        Configuración
+      </button>
+      <button class="nav-btn" id="btnToggleTheme" title="Alternar Modo Claro / Oscuro">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <span id="lblThemeText">Oscuro</span>
+      </button>
+    </div>
+
+    <!-- Controles de Ventana -->
+    <div class="titlebar-win-controls">
+      <button class="win-btn" id="btnWinMinimize" title="Minimizar">
+        <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor"><rect width="10" height="1"/></svg>
+      </button>
+      <button class="win-btn" id="btnWinMaximize" title="Maximizar / Restaurar">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2"><rect width="9" height="9" x="0.5" y="0.5" rx="1"/></svg>
+      </button>
+      <button class="win-btn close" id="btnWinClose" title="Cerrar">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><line x1="1" y1="1" x2="9" y2="9"/><line x1="9" y1="1" x2="1" y2="9"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Viewport Principal de la Aplicación -->
+  <main class="app-viewport">
+
+    <!-- ==================================================================== -->
+    <!-- HERRAMIENTA 1: ANALIZADOR DE VIRTUALES                               -->
+    <!-- ==================================================================== -->
+    <section class="tool-view-panel active" id="viewAnalizador">
+      <!-- Hero Branding Analizador -->
+      <div class="app-hero-brand">
+        <div class="brand-wrapper">
+          <div class="brand-logo-container">
+            <img src="assets/logo.png" alt="VM Inventory" id="imgLogo" class="brand-custom-img" onerror="this.style.display='none'; document.getElementById('logoFallback').style.display='flex';" />
+            
+            <div id="logoFallback" class="brand-logo-symbol" style="display: none;">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect width="20" height="8" x="2" y="2" rx="2" ry="2"/>
+                <rect width="20" height="8" x="2" y="14" rx="2" ry="2"/>
+                <line x1="6" x2="6.01" y1="6" y2="6"/>
+                <line x1="6" x2="6.01" y1="18" y2="18"/>
+              </svg>
+            </div>
+          </div>
+          <div>
+            <div class="brand-title-main">
+              <span class="brand-title-app">VM Inventory</span>
+              <span class="brand-title-sub">| Analizador de Máquinas Virtuales</span>
+            </div>
+            <div class="brand-subtitle-tag">Inspección de discos, sistemas de archivos, metadatos y software • Motor vminspect-rs</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Flujo de 4 Pasos (Origen, Destino, Nombre-JSON, Análisis) -->
+      <div class="steps-container">
+        <!-- Paso 1: Origen -->
+        <div class="step-card" id="cardStepOrigen" role="button" tabindex="0" title="Seleccionar carpeta de origen con VMs" data-step="origen">
+          <div class="step-icon-box">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+          </div>
+          <div class="step-details">
+            <div class="step-title">Origen</div>
+            <div class="step-subtitle" id="lblOrigen">Seleccionar carpeta</div>
+          </div>
+          <div class="step-tooltip">
+            <div class="step-tooltip-header">1. Directorio de Origen</div>
+            <div class="step-tooltip-body">Carpeta o unidad que contiene las máquinas virtuales (.vmx, .vbox, .vmdk, .vdi, .vhdx) a relevar.</div>
+          </div>
+        </div>
+
+        <!-- Paso 2: Destino -->
+        <div class="step-card" id="cardStepDestino" role="button" tabindex="0" title="Seleccionar carpeta donde guardar el reporte JSON" data-step="destino">
+          <div class="step-icon-box">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </div>
+          <div class="step-details">
+            <div class="step-title">Destino</div>
+            <div class="step-subtitle" id="lblDestino">Seleccionar carpeta</div>
+          </div>
+          <div class="step-tooltip">
+            <div class="step-tooltip-header">2. Directorio de Destino</div>
+            <div class="step-tooltip-body">Carpeta donde se guardará el informe JSON consolidado con los resultados del relevamiento.</div>
+          </div>
+        </div>
+
+        <!-- Paso 3: Nombre-JSON -->
+        <div class="step-card step-card-input ready" id="cardStepNombreJson" data-step="nombre-json">
+          <div class="step-icon-box">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1"/>
+              <path d="M14 12a1 1 0 0 1 1 1v1a1 1 0 0 1-1 1"/>
+            </svg>
+          </div>
+          <div class="step-details">
+            <div class="step-title">Nombre-JSON</div>
+            <div class="step-input-wrapper">
+              <input type="text" id="inputNombreArchivoSalida" class="step-inline-input" value="Relevamiento_VMs.json" placeholder="Relevamiento_VMs.json" spellcheck="false" autocomplete="off" title="Nombre del archivo JSON" />
+            </div>
+          </div>
+          <div class="step-tooltip">
+            <div class="step-tooltip-header">3. Nombre del Archivo JSON</div>
+            <div class="step-tooltip-body">Nombre asignado al archivo .json de reporte. Es fundamental porque la base de datos y el Consultor lo toman como identificador para buscar software y relacionar las VMs.</div>
+          </div>
+        </div>
+
+        <!-- Paso 4: Acción Análisis -->
+        <button class="step-card action-card" id="btnIniciarAccion" type="button" disabled title="Iniciar análisis de VMs" data-step="analisis">
+          <div class="step-icon-box" id="iconAnalisis">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+          </div>
+          <div class="step-details">
+            <div class="step-title" id="lblTitleAccion">Análisis</div>
+            <div class="step-subtitle" id="lblHilosAccion">Iniciar</div>
+          </div>
+          <div class="step-tooltip">
+            <div class="step-tooltip-header">4. Iniciar Análisis</div>
+            <div class="step-tooltip-body">Ejecuta el motor vminspect-rs multihilo para escanear particiones, sistemas de archivos, registros y software de cada VM.</div>
+          </div>
+        </button>
+      </div>
+
+      <!-- Panel de Telemetría en Tiempo Real -->
+      <div class="telemetry-deck" id="deckTelemetria">
+        <!-- Fila Principal de Estado y Porcentaje Global -->
+        <div class="telemetry-main-row">
+          <div class="telemetry-status-text">
+            <span class="status-badge idle" id="badgeFase">Inactivo</span>
+            <span id="lblProgresoMsg">Listo para iniciar. Selecciona origen, destino y nombre.</span>
+          </div>
+          <div class="telemetry-percentage" id="lblBigPorcentaje">0.0%</div>
+        </div>
+
+        <!-- Barra de Progreso General -->
+        <div class="progress-rail">
+          <div class="progress-fill" id="barGlobal"></div>
+        </div>
+
+        <!-- Panel de Métricas Clave (4 KPI Cards Grandes, Claras y Espaciosas) -->
+        <div class="telemetry-kpi-grid">
+          <!-- KPI 1: VMs Procesadas -->
+          <div class="telemetry-kpi-card">
+            <div class="telemetry-kpi-header">
+              <span class="telemetry-kpi-label">Progreso VMs</span>
+              <svg class="kpi-header-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+            </div>
+            <div class="telemetry-kpi-body">
+              <div class="telemetry-kpi-content">
+                <div class="telemetry-kpi-value" id="statVms">0 / 0</div>
+                <div class="telemetry-kpi-sub" id="hudDonutCenterSub">VMs procesadas</div>
+              </div>
+            </div>
+            <!-- Elementos preservados para compatibilidad -->
+            <span id="donutSegOk" style="display:none;"></span>
+            <span id="donutSegWarn" style="display:none;"></span>
+            <span id="donutSegActive" style="display:none;"></span>
+            <span id="hudDonutCenterVal" style="display:none;"></span>
+            <span id="hudLegOk" style="display:none;"></span>
+            <span id="hudLegWarn" style="display:none;"></span>
+            <span id="hudLegActive" style="display:none;"></span>
+            <span id="hudLegPending" style="display:none;"></span>
+          </div>
+
+          <!-- KPI 2: Estado y Diagnósticos -->
+          <div class="telemetry-kpi-card">
+            <div class="telemetry-kpi-header">
+              <span class="telemetry-kpi-label">Estado</span>
+              <svg class="kpi-header-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+            </div>
+            <div class="telemetry-kpi-body">
+              <div class="telemetry-kpi-content">
+                <div class="telemetry-kpi-value text-success" id="statExitosas">✓ 0 exitosas</div>
+                <div class="telemetry-kpi-sub">
+                  <span class="metric-badge-warn" id="statObservaciones" style="display: none;">⚠ 0 obs.</span>
+                  <span class="telemetry-kpi-sub-ok" id="lblSinObservaciones">Sin discrepancias</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPI 3: Rendimiento y Velocidad -->
+          <div class="telemetry-kpi-card">
+            <div class="telemetry-kpi-header">
+              <span class="telemetry-kpi-label">Velocidad</span>
+              <svg class="kpi-header-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div class="telemetry-kpi-body">
+              <div class="telemetry-kpi-content">
+                <div class="telemetry-kpi-value text-accent" id="statVelocidad">0.0 VM/min</div>
+                <div class="telemetry-kpi-sub" id="hudThroughputText">En espera</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- KPI 4: Tiempo & ETA -->
+          <div class="telemetry-kpi-card">
+            <div class="telemetry-kpi-header">
+              <span class="telemetry-kpi-label">Tiempo</span>
+              <svg class="kpi-header-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <div class="telemetry-kpi-body">
+              <div class="telemetry-kpi-content">
+                <div class="telemetry-kpi-value" id="statTiempo">00:00</div>
+                <div class="telemetry-kpi-sub">
+                  <span id="itemEta" style="display: none;"><strong id="statEta" style="color: var(--primary);">ETA: --:--</strong></span>
+                  <span id="lblTiempoSub" class="telemetry-kpi-sub-muted">Cronómetro</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hilos de Trabajo Activos -->
+        <div class="workers-box" id="wrapperWorkers" style="display: none;">
+          <span class="stat-pill-label">Máquinas en análisis concurrente:</span>
+          <div id="listWorkers" style="display: flex; flex-direction: column; gap: 6px;"></div>
+        </div>
+
+        <!-- Barra Individual por VM -->
+        <div class="progress-box" id="wrapperVmIndividual" style="display: none;">
+          <div class="progress-info-row">
+            <div style="font-size: 13px; font-weight: 600; color: #38bdf8;" id="lblVmIndividualTitulo">VM Actual: -</div>
+            <div style="font-size: 12px; color: var(--text-muted);" id="lblVmIndividualPorcentaje">0%</div>
+          </div>
+          <div class="progress-rail" style="height: 6px;">
+            <div class="progress-fill" id="barVmIndividual" style="background: #06b6d4;"></div>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);" id="lblVmIndividualEtapa">En espera</div>
+        </div>
+
+        <!-- Terminal de Supervisión / Logs -->
+        <div id="wrapperBitacora" style="display: none; flex-direction: column; gap: 6px;">
+          <span class="stat-pill-label">Bitácora de Supervisión:</span>
+          <div class="terminal-deck" id="logConsole">
+            <div class="log-item"><span class="log-time">[--:--:--]</span> <span class="log-info">[INFO]</span> Sistema preparado y listo para iniciar relevamiento.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- ==================================================================== -->
+    <!-- HERRAMIENTA 2: CONSULTOR DE SOFTWARE Y VMS                           -->
+    <!-- ==================================================================== -->
+    <section class="tool-view-panel" id="viewConsultor" style="display: none;">
+      <!-- Hero Branding Consultor -->
+      <div class="app-hero-brand">
+        <div class="brand-wrapper">
+          <div class="brand-logo-container">
+            <div class="brand-logo-symbol">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </div>
+          </div>
+          <div>
+            <div class="brand-title-main">
+              <span class="brand-title-app">VM Inventory</span>
+              <span class="brand-title-sub">| Consultor de Software en VMs</span>
+            </div>
+            <div class="brand-subtitle-tag">Búsqueda rápida de programas instalados y localización de máquinas virtuales y discos</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barra de Búsqueda y Filtros del Consultor con Panel Lateral de Acciones -->
+      <div class="consultor-search-layout">
+        <!-- Panel Principal de Filtros (3 Filas) -->
+        <div class="consultor-filters-card">
+          <!-- Fila 1: Programa o Aplicación - Versión -->
+          <div class="consultor-search-row">
+            <div class="consultor-input-group flex-app">
+              <label class="form-label" for="inputBuscarPrograma">Programa o Aplicación:</label>
+              <div class="search-input-wrapper">
+                <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" id="inputBuscarPrograma" class="form-input search-field" list="datalistProgramas" placeholder="Buscar software: SQL Server, Oracle, Python, WinRAR..." autocomplete="off" />
+                <button class="clear-search-btn" id="btnLimpiarPrograma" type="button" title="Borrar búsqueda" style="display: none;">&times;</button>
+              </div>
+              <datalist id="datalistProgramas"></datalist>
+            </div>
+
+            <div class="consultor-input-group flex-ver">
+              <label class="form-label" for="inputBuscarVersion">Versión:</label>
+              <input type="text" id="inputBuscarVersion" class="form-input" list="datalistVersiones" placeholder="Ej: 16.0, 3.11..." autocomplete="off" />
+              <datalist id="datalistVersiones"></datalist>
+            </div>
+          </div>
+
+          <!-- Fila 2: Máquina Virtual -->
+          <div class="consultor-search-row">
+            <div class="consultor-input-group flex-vm">
+              <label class="form-label" for="inputBuscarVm">Máquina Virtual:</label>
+              <div class="search-input-wrapper">
+                <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/>
+                </svg>
+                <input type="text" id="inputBuscarVm" class="form-input search-field" list="datalistVms" placeholder="Buscar VM: Win10-Dev, Ubuntu..." autocomplete="off" />
+                <button class="clear-search-btn" id="btnLimpiarVm" type="button" title="Borrar búsqueda" style="display: none;">&times;</button>
+              </div>
+              <datalist id="datalistVms"></datalist>
+            </div>
+          </div>
+
+          <!-- Fila 3: Asignado o Ubicación -->
+          <div class="consultor-search-row">
+            <div class="consultor-input-group flex-tipo">
+              <label class="form-label" for="selectBuscarTipo">Tipo / Ubicación:</label>
+              <select id="selectBuscarTipo" class="form-input">
+                <option value="todos">Todos los Tipos</option>
+                <option value="Personas">👤 Personas</option>
+                <option value="Discos">💾 Discos</option>
+                <option value="Servidores">🖥️ Servidores</option>
+              </select>
+            </div>
+
+            <div class="consultor-input-group flex-owner">
+              <label class="form-label" for="inputBuscarPropietario">Asignado / Elemento:</label>
+              <div class="search-input-wrapper">
+                <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+                </svg>
+                <input type="text" id="inputBuscarPropietario" class="form-input search-field" list="datalistPropietarios" placeholder="Ej: Juan Costa Suarez, Disco 01..." autocomplete="off" />
+              </div>
+              <datalist id="datalistPropietarios"></datalist>
+            </div>
+          </div>
+
+          <!-- Fila 4: Categoría Funcional y Sistema Operativo -->
+          <div class="consultor-search-row">
+            <div class="consultor-input-group flex-tipo">
+              <label class="form-label" for="selectBuscarCategoria">Categoría Funcional (vminspect-rs):</label>
+              <select id="selectBuscarCategoria" class="form-input">
+                <option value="todas">🏷️ Todas las Categorías</option>
+              </select>
+            </div>
+
+            <div class="consultor-input-group flex-owner">
+              <label class="form-label" for="selectBuscarSo">Sistema Operativo Huésped:</label>
+              <select id="selectBuscarSo" class="form-input">
+                <option value="todos">🌐 Todos los Sistemas</option>
+                <option value="windows">🪟 Windows</option>
+                <option value="linux">🐧 Linux</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Panel Lateral de Acciones (Buscar, Limpiar Filtros y Reindexar) -->
+        <div class="consultor-actions-card">
+          <div class="action-btn-container" data-action-tooltip="Consultar coincidencias según los filtros activos">
+            <button class="step-action-btn ready-to-run consultor-btn-primary" id="btnEjecutarBusquedaSoftware" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <span>Buscar</span>
+            </button>
+          </div>
+
+          <div class="action-btn-container" data-action-tooltip="Restablecer todos los campos de búsqueda">
+            <button class="step-btn consultor-btn-secondary" id="btnLimpiarFiltros" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              </svg>
+              <span>Limpiar Filtros</span>
+            </button>
+          </div>
+
+          <div class="action-btn-container" data-action-tooltip="Volver a escanear y sincronizar los reportes JSON de la base de datos">
+            <button class="step-btn consultor-btn-reindex" id="btnRecargarSoftware" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+              </svg>
+              <span>Reindexar Reportes</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barra de Resumen y Acciones del Consultor -->
+      <div class="consultor-summary-bar" id="barResumenSoftware">
+        <div class="consultor-summary-info">
+          <span id="lblSoftwareMetricas">Escribe el nombre de un programa para encontrar en qué máquinas virtuales y discos se encuentra.</span>
+        </div>
+
+        <div class="consultor-summary-controls">
+          <!-- Conmutador de Vistas: Diagrama Relacional / Tarjetas -->
+          <div class="consultor-view-toggle">
+            <button class="view-toggle-btn" id="btnVistaDiagrama" type="button" disabled title="Aplica al menos un filtro (programa, máquina virtual, persona, disco o servidor) para habilitar el diagrama relacional">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="12" cy="18" r="3"/>
+                <line x1="6" y1="9" x2="12" y2="15"/><line x1="18" y1="9" x2="12" y2="15"/>
+              </svg>
+              <span>Diagrama</span>
+            </button>
+            <button class="view-toggle-btn active" id="btnVistaTarjetas" type="button" disabled title="Aplica al menos un filtro para ver los resultados en tarjetas">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+              </svg>
+              <span>Tarjetas</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Contenedor Principal de Resultados -->
+      <div class="consultor-results-wrapper" id="containerResultadosSoftware">
+
+        <!-- VISTA 1: DIAGRAMA RELACIONAL DE NODOS -->
+        <div class="consultor-graph-wrapper" id="consultorGraphWrapper" style="display: none;">
+          <div class="graph-floating-toolbar">
+            <button class="graph-tool-btn" id="btnGraphZoomIn" type="button" title="Acercar zoom">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+            <button class="graph-tool-btn" id="btnGraphZoomOut" type="button" title="Alejar zoom">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+            </button>
+            <button class="graph-tool-btn" id="btnGraphFit" type="button" title="Ajustar y centrar diagrama">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+            </button>
+            <span class="graph-legend-pill">
+              <span class="legend-dot dot-app"></span> Software
+              <span class="legend-dot dot-vm"></span> VM
+              <span class="legend-dot dot-owner"></span> Persona
+              <span class="legend-dot dot-disk"></span> Disco
+              <span class="legend-dot dot-server"></span> Servidor
+            </span>
+          </div>
+
+          <div class="graph-canvas-container" id="graphCanvasContainer">
+            <svg id="consultorGraphSvg" class="consultor-graph-svg"></svg>
+          </div>
+
+          <!-- Tooltip flotante al pasar el mouse por encima de un nodo -->
+          <div class="graph-tooltip" id="graphTooltip" style="display: none;"></div>
+
+          <!-- Panel lateral / inferior de detalles al hacer click en un nodo -->
+          <div class="graph-detail-drawer" id="graphDetailDrawer" style="display: none;">
+            <div class="drawer-header">
+              <div class="drawer-title" id="drawerTitle">Detalles del Elemento</div>
+              <button class="drawer-close-btn" id="btnCloseDetailDrawer" type="button">&times;</button>
+            </div>
+            <div class="drawer-body" id="drawerBody"></div>
+          </div>
+        </div>
+
+        <!-- VISTA 2: LISTA TRADICIONAL DE TARJETAS -->
+        <div class="consultor-cards-wrapper" id="consultorCardsWrapper"></div>
+
+        <!-- ESTADO VACÍO O INICIAL -->
+        <div class="empty-history-text" id="consultorEmptyState">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 8px; opacity: 0.6;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <div>Ingresa el nombre de un programa o filtra por propietario arriba.</div>
+          <div style="font-size: 11px; margin-top: 4px; color: var(--text-muted);">Los datos se analizan desde los reportes JSON indexados.</div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- HERRAMIENTA 3: INSPECTOR DE VM INDIVIDUAL                            -->
+    <!-- ==================================================================== -->
+    <section class="tool-view-panel" id="viewInspector" style="display: none;">
+      <!-- Hero Branding Inspector -->
+      <div class="app-hero-brand">
+        <div class="brand-wrapper">
+          <div class="brand-logo-container">
+            <div class="brand-logo-symbol">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <ellipse cx="12" cy="5" rx="9" ry="3"/>
+                <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+                <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+              </svg>
+            </div>
+          </div>
+          <div>
+            <div class="brand-title-main">
+              <span class="brand-title-app">VM Inventory</span>
+              <span class="brand-title-sub">| Inspector de VM</span>
+            </div>
+            <div class="brand-subtitle-tag">Análisis estático directo de imágenes VMDK, VDI, VHDX, RAW sin arrancar la VM • Motor vminspect-rs</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barra de Pasos / Selección del Inspector -->
+      <div class="steps-container" style="grid-template-columns: 1fr auto;">
+        <!-- Paso 1: Seleccionar archivo de disco -->
+        <div class="step-card" id="cardStepDiscoInspector" role="button" tabindex="0" title="Seleccionar archivo de disco virtual">
+          <div class="step-icon-box">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2"/>
+              <line x1="6" y1="12" x2="6.01" y2="12"/><line x1="10" y1="12" x2="10.01" y2="12"/>
+            </svg>
+          </div>
+          <div class="step-details">
+            <div class="step-title">Disco Virtual a Inspeccionar</div>
+            <div class="step-subtitle" id="lblDiscoInspectorRuta">Seleccionar archivo (.vmdk, .vdi, .vhdx, .raw)</div>
+          </div>
+          <button class="step-btn" id="btnSeleccionarDiscoInspector" type="button" style="margin-left: auto; z-index: 2;">Examinar...</button>
+        </div>
+
+        <!-- Paso 2: Acción Ejecutar Inspección -->
+        <button class="step-card action-card" id="btnIniciarInspeccionDisco" type="button" disabled title="Iniciar inspección estática del disco" style="min-width: 170px;">
+          <div class="step-icon-box">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+          </div>
+          <div class="step-details">
+            <div class="step-title">Inspección</div>
+            <div class="step-subtitle">Analizar disco</div>
+          </div>
+        </button>
+      </div>
+
+      <!-- Barra de Progreso en Vivo del Inspector -->
+      <div class="inspector-progress-box" id="wrapperProgresoInspector" style="display: none;">
+        <div class="progress-info-row">
+          <div style="font-weight: 600; color: #38bdf8;" id="lblEtapaInspector">Analizando disco...</div>
+          <div style="font-size: 13px; font-weight: 700; color: var(--text);" id="lblPorcentajeInspector">0%</div>
+        </div>
+        <div class="progress-rail" style="height: 8px;">
+          <div class="progress-fill" id="barProgresoInspector" style="background: linear-gradient(90deg, #0284c7, #38bdf8);"></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted);" id="lblDetalleInspector"></div>
+      </div>
+
+      <!-- Contenedor de Resultados del Inspector de VM -->
+      <div class="inspector-results-wrapper" id="containerResultadosInspector" style="display: none;">
+        
+        <!-- Fila 1: Tarjetas de Información de Disco y SO -->
+        <div class="inspector-grid-two-col">
+          <!-- Tarjeta 1: Parámetros y Geometría de Imagen -->
+          <div class="inspector-card">
+            <div class="inspector-card-header">
+              <div class="inspector-card-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                Imagen y Rendimiento
+              </div>
+              <span class="consultor-possession-badge badge-disco" id="lblInspFormato">VMDK</span>
+            </div>
+            <div class="inspector-data-grid">
+              <div class="inspector-data-item">
+                <span class="inspector-data-label">Hipervisor:</span>
+                <strong id="lblInspHipervisor">-</strong>
+              </div>
+              <div class="inspector-data-item">
+                <span class="inspector-data-label">Capacidad Virtual:</span>
+                <strong id="lblInspTamanoVirtual">-</strong>
+              </div>
+              <div class="inspector-data-item">
+                <span class="inspector-data-label">Tamaño Real en Disco:</span>
+                <strong id="lblInspTamanoReal">-</strong>
+              </div>
+              <div class="inspector-data-item">
+                <span class="inspector-data-label">Modo de Acceso:</span>
+                <strong id="lblInspAcceso">-</strong>
+              </div>
+              <div class="inspector-data-item">
+                <span class="inspector-data-label">Tiempo de Análisis:</span>
+                <strong id="lblInspDuracion" style="color: var(--accent);">-</strong>
+              </div>
+              <div class="inspector-data-item">
+                <span class="inspector-data-label">Bytes Extraídos:</span>
+                <strong id="lblInspBytesLeidos">-</strong>
+              </div>
+              <div class="inspector-data-item">
+                <span class="inspector-data-label">Invocaciones qemu-img:</span>
+                <strong id="lblInspQemuCalls">-</strong>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tarjeta 2: Sistema Operativo Huésped y VM Tools -->
+          <div class="inspector-card">
+            <div class="inspector-card-header">
+              <div class="inspector-card-title">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                Sistema Operativo Huésped
+              </div>
+            </div>
+            <div class="inspector-os-body">
+              <div style="font-size: 16px; font-weight: 700; color: var(--text);" id="lblInspSoNombre">No identificado</div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;" id="lblInspSoDetalles">Sin datos de compilación</div>
+              <div style="margin-top: 14px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid var(--border); padding-top: 10px;">
+                <span style="font-size: 12px; color: var(--text-muted);">Herramientas de Integración:</span>
+                <span id="lblInspVmTools">-</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fila 2: Tabla de Particiones y Sistemas de Archivos -->
+        <div class="inspector-card">
+          <div class="inspector-card-header">
+            <div class="inspector-card-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+              Particiones y Sistemas de Archivos
+            </div>
+            <span class="consultor-version-badge" id="lblInspEsquema">Tabla: MBR</span>
+          </div>
+          <div class="inspector-partitions-list" id="listInspParticiones"></div>
+        </div>
+
+        <!-- Fila 3: Inventario de Software Instalado -->
+        <div class="inspector-card">
+          <div class="inspector-card-header">
+            <div class="inspector-card-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/></svg>
+              Software Instalado Identificado
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span class="telemetry-kpi-sub" id="lblTotalProgramasInspector">0 programas</span>
+              <button class="step-btn" id="btnExportarInformeDisco" type="button" style="padding: 4px 12px; font-size: 11px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Exportar Informe JSON
+              </button>
+            </div>
+          </div>
+
+          <!-- Filtros de la tabla de software del inspector -->
+          <div class="inspector-table-filters">
+            <input type="text" id="inputFiltrarSoftwareInspector" class="form-input" placeholder="Filtrar software por nombre, editor o tag..." style="flex: 1;" />
+            <select id="selectCategoriaSoftwareInspector" class="form-input" style="width: 220px;">
+              <option value="todas">🏷️ Todas las Categorías</option>
+            </select>
+          </div>
+
+          <!-- Tabla con scroll -->
+          <div class="inspector-table-wrapper">
+            <table class="inspector-table">
+              <thead>
+                <tr>
+                  <th>Programa / Aplicación</th>
+                  <th style="width: 130px;">Versión</th>
+                  <th>Editor / Fabricante</th>
+                  <th>Categoría</th>
+                  <th>Etiquetas / Tags</th>
+                </tr>
+              </thead>
+              <tbody id="tbodySoftwareInspector"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Estado Vacío Inspector -->
+      <div class="empty-history-text" id="inspectorEmptyState" style="margin-top: 40px;">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 8px; opacity: 0.6;"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+        <div style="font-weight: 600;">Selecciona un archivo de disco virtual (.vmdk, .vdi, .vhdx, .raw) arriba.</div>
+        <div style="font-size: 11px; margin-top: 4px; color: var(--text-muted);">vminspect-rs analizará la tabla de particiones, el SO y extraerá las aplicaciones sin necesidad de montar el disco.</div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Barra de Estado Inferior -->
+  <footer class="statusbar">
+    <div id="sysDiagnosticText">Cargando diagnóstico del sistema...</div>
+    <div><span class="statusbar-brand">VM Inventory</span> • v1.0.1</div>
+  </footer>
+
+  <!-- MODAL: HISTORIAL DE RELEVAMIENTOS (ANALIZADOR) -->
+  <div class="modal-overlay" id="modalHistorial">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          Historial de Relevamientos
+        </div>
+        <button class="modal-close-btn" id="btnCloseHistorial" title="Cerrar ventana">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="history-list" id="containerHistorial">
+          <div class="empty-history-text">No hay relevamientos registrados aún.</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="step-btn" id="btnClearHistorial" style="color: var(--danger); border-color: rgba(244, 63, 94, 0.3);">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          Limpiar Historial
+        </button>
+        <button class="step-btn" id="btnOkHistorial">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CONFIGURACIÓN DEL ANALIZADOR -->
+  <div class="modal-overlay" id="modalAjustes">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          Configuración del Analizador
+        </div>
+        <button class="modal-close-btn" id="btnCloseAjustes" title="Cerrar ventana">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- Concurrencia -->
+        <div class="form-section-title">Multithreading y Concurrencia</div>
+        <div class="form-field">
+          <label class="form-label" for="cfgMaxHilos">Hilos de Análisis Concurrentes (1 - 32):</label>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="number" id="cfgMaxHilos" class="form-input" min="1" max="32" value="4" style="width: 100px;" />
+            <span style="font-size: 12px; color: #38bdf8;" id="lblHilosRecomendados"></span>
+          </div>
+          <div class="form-help">Recomendado: 4-8 hilos en unidades SSD/NVMe; 1-2 en discos HDD mecánicos.</div>
+        </div>
+
+        <!-- Opciones vminspect-rs -->
+        <div class="form-section-title" style="margin-top: 10px;">Motor de Inspección (vminspect-rs)</div>
+        
+        <label class="form-checkbox-row">
+          <input type="checkbox" id="cfgModoDump" />
+          <div>
+            <div class="form-checkbox-label">Modo Volcado Completo (modo_dump)</div>
+            <div class="form-help">Extrae la lista exhaustiva de programas instalados omitiendo filtros de ruido</div>
+          </div>
+        </label>
+
+        <label class="form-checkbox-row">
+          <input type="checkbox" id="cfgIncluirSystem" />
+          <div>
+            <div class="form-checkbox-label">Incluir Colmena SYSTEM de Windows (incluir_system)</div>
+            <div class="form-help">Inspecciona la colmena del registro SYSTEM además de SOFTWARE para mayor detalle técnico</div>
+          </div>
+        </label>
+
+        <label class="form-checkbox-row">
+          <input type="checkbox" id="cfgForzarQemu" />
+          <div>
+            <div class="form-checkbox-label">Forzar Backend QEMU (forzar_qemu)</div>
+            <div class="form-help">Obliga a utilizar el binario qemu-img en todos los formatos de disco</div>
+          </div>
+        </label>
+
+        <div class="form-field">
+          <label class="form-label" for="cfgRutaQemu">Ruta Personalizada del Binario qemu-img (Opcional):</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="cfgRutaQemu" class="form-input" placeholder="Dejar vacío para detección automática en PATH..." style="flex: 1;" />
+            <button class="step-btn" id="btnExaminarQemu" type="button">Examinar...</button>
+            <button class="step-btn" id="btnValidarQemu" type="button" title="Comprobar si el binario qemu-img es ejecutable y funcional">Validar QEMU</button>
+          </div>
+          <div id="lblEstadoValidacionQemu" style="font-size: 11px; margin-top: 4px; color: var(--text-muted);"></div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="cfgRutaReglas">Ruta Personalizada de Reglas TOML (reglas.toml):</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="cfgRutaReglas" class="form-input" placeholder="Dejar vacío para usar reglas.toml por defecto..." style="flex: 1;" />
+            <button class="step-btn" id="btnExaminarReglas" type="button">Examinar...</button>
+            <button class="step-btn" id="btnOpenSimuladorReglas" type="button" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="Abrir simulador para probar cómo clasifica vminspect-rs una aplicación">Simulador de Reglas</button>
+          </div>
+          <div class="form-help">Permite personalizar categorías industriales, palabras clave y listas de exclusión.</div>
+        </div>
+
+        <div class="form-field">
+          <label class="form-label" for="cfgTamanoChunk">Tamaño de Chunk de Caché en KB (tamano_chunk):</label>
+          <input type="number" id="cfgTamanoChunk" class="form-input" placeholder="Automático (vacío o 0)" min="0" step="64" style="width: 180px;" />
+          <div class="form-help">En automático, vminspect-rs aplica 256 KB en modo nativo y 4 MB en fallback QEMU para optimizar la velocidad y lecturas.</div>
+        </div>
+
+        <!-- Preferencias de Supervisión -->
+        <div class="form-section-title" style="margin-top: 10px;">Preferencias y Supervisión</div>
+
+        <label class="form-checkbox-row">
+          <input type="checkbox" id="cfgGenerarDiscrepancias" />
+          <div>
+            <div class="form-checkbox-label">Supervisar y Registrar Discrepancias de Nombres</div>
+            <div class="form-help">Compara si el nombre de la carpeta coincide con el nombre interno del archivo (.vmx / .vbox)</div>
+          </div>
+        </label>
+
+        <label class="form-checkbox-row">
+          <input type="checkbox" id="cfgHabilitarBitacora" />
+          <div>
+            <div class="form-checkbox-label">Habilitar Bitácora de Supervisión</div>
+            <div class="form-help">Muestra la terminal de logs en tiempo real durante el análisis</div>
+          </div>
+        </label>
+
+        <label class="form-checkbox-row">
+          <input type="checkbox" id="cfgMostrarProgresoIndividual" />
+          <div>
+            <div class="form-checkbox-label">Mostrar Barra de Progreso Individual por VM</div>
+            <div class="form-help">Visualiza el progreso individual de la máquina virtual que se está analizando</div>
+          </div>
+        </label>
+
+        <div class="form-field">
+          <label class="form-label" for="cfgNombreArchivo">Nombre del Archivo de Reporte JSON:</label>
+          <input type="text" id="cfgNombreArchivo" class="form-input" value="Relevamiento_VMs.json" style="width: 240px;" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="step-btn" id="btnRestablecerAjustes">Restablecer Defaults</button>
+        <button class="step-action-btn" id="btnGuardarAjustes" style="width: auto; padding: 8px 18px;">Guardar Cambios</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CONFIGURACIÓN ESPECÍFICA DEL CONSULTOR -->
+  <div class="modal-overlay" id="modalConfigConsultor">
+    <div class="modal-card" style="max-width: 600px;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+          Configuración del Consultor
+        </div>
+        <button class="modal-close-btn" id="btnCloseConfigConsultor" title="Cerrar ventana">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="form-section-title">Base de Datos de Informes JSON</div>
+        <div class="form-field">
+          <label class="form-label" for="cfgRutaBdJson">Directorio de Reportes JSON para Búsqueda:</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="cfgRutaBdJson" class="form-input" placeholder="Carpeta donde se ubican los archivos .json de relevamiento..." style="flex: 1;" />
+            <button class="step-btn" id="btnExaminarBdJson" type="button">Examinar...</button>
+          </div>
+          <div class="form-help" style="margin-top: 6px; line-height: 1.4;">
+            El consultor buscará todos los archivos <code>.json</code> dentro de esta carpeta para indexar los programas instalados y la ubicación de las máquinas virtuales.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="step-btn" id="btnCancelarConfigConsultor">Cancelar</button>
+        <button class="step-action-btn" id="btnGuardarConfigConsultor" style="width: auto; padding: 8px 18px;">Guardar y Consultar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: SIMULADOR Y TESTER DE REGLAS VMCOUNT -->
+  <div class="modal-overlay" id="modalSimuladorReglas">
+    <div class="modal-card" style="max-width: 650px;">
+      <div class="modal-header">
+        <div class="modal-title">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>
+          Simulador de Reglas y Clasificación (vminspect-rs)
+        </div>
+        <button class="modal-close-btn" id="btnCloseSimuladorReglas" title="Cerrar ventana">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <!-- Resumen de reglas cargadas -->
+        <div style="background: var(--surface-hover); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; font-size: 12px; margin-bottom: 14px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+            <span style="color: var(--text-muted);">Origen de reglas:</span>
+            <strong id="lblSimOrigenReglas" style="color: var(--text);">Cargando...</strong>
+          </div>
+          <div style="display: flex; gap: 16px; color: var(--text-muted); font-size: 11px;">
+            <span>Whitelist industrial: <strong id="lblSimTotalWhitelist" style="color: #38bdf8;">-</strong> palabras</span>
+            <span>Categorías activas: <strong id="lblSimTotalCategorias" style="color: #38bdf8;">-</strong></span>
+          </div>
+        </div>
+
+        <div class="form-section-title">Probar Entrada de Software</div>
+        <div class="form-field">
+          <label class="form-label" for="inputSimNombre">Nombre del Programa o Paquete:</label>
+          <input type="text" id="inputSimNombre" class="form-input" placeholder="Ej: SIMATIC STEP 7, TIA Portal, node-red, apache2..." />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="inputSimEditor">Editor / Fabricante (Opcional):</label>
+          <input type="text" id="inputSimEditor" class="form-input" placeholder="Ej: Siemens AG, Rockwell Automation, Canonical..." />
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="selectSimSo">Familia de Sistema Operativo:</label>
+          <select id="selectSimSo" class="form-input">
+            <option value="windows">🪟 Microsoft Windows (Registro / Uninstall)</option>
+            <option value="linux">🐧 Linux (DPKG / RPM Packages)</option>
+          </select>
+        </div>
+
+        <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+          <button class="step-action-btn ready-to-run" id="btnEjecutarSimulacionReglas" type="button" style="width: auto; padding: 6px 16px;">
+            Evaluar Clasificación
+          </button>
+        </div>
+
+        <!-- Resultado de la simulación -->
+        <div id="containerResultadoSimulacion" style="display: none; margin-top: 14px; border-top: 1px solid var(--border); padding-top: 12px;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="step-btn" id="btnOkSimuladorReglas">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/js/main.js"></script>
+</body>
+</html>

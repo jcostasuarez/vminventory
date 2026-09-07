@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- El fondo es transparente por defecto -->
+  <g transform="translate(256, 256)">
+
+    <!-- Nodo inferior izquierdo (Cian) -->
+    <g transform="translate(-80, 80)">
+      <circle cx="0" cy="0" r="34" fill="#21C1D3" />
+      <path d="M 66.47 66.47 A 94 94 0 1 1 47 -81.41"
+            fill="none" stroke="#21C1D3" stroke-width="52" stroke-linecap="butt" />
+    </g>
+
+    <!-- Nodo superior derecho (Amarillo) -->
+    <g transform="translate(80, -80)">
+      <circle cx="0" cy="0" r="34" fill="#FAC123" />
+      <path d="M 66.47 66.47 A 94 94 0 1 1 47 -81.41"
+            fill="none" stroke="#FAC123" stroke-width="52" stroke-linecap="butt"
+            transform="rotate(180)" />
+    </g>
+
+  </g>
+</svg>
