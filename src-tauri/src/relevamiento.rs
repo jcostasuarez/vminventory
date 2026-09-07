@@ -14,6 +14,7 @@
 //! 5. Consolida la base de datos indexada en JSON para el Consultor.
 
 use crate::clasificacion::ReglasClasificacion;
+use crate::commands::resolver_ruta_qemu_nbd;
 use crate::models::{
     BdRelevamiento, ConfiguracionApp, EstadoSupervision, LogSupervision, MetadatosRelevamiento,
     ProgramaClasificado, RegistroVM, ResumenRelevamiento, VmActiva,
@@ -107,9 +108,16 @@ pub fn construir_opciones(config: &ConfiguracionApp, cancelacion: &Arc<AtomicBoo
     let mut opciones = Options::default();
     opciones.include_system = config.incluir_system;
     opciones.force_nbd = config.forzar_qemu;
-    if let Some(qemu) = config.ruta_qemu_img.as_deref() {
+    if let Some(qemu) = config.ruta_qemu_nbd.as_deref() {
         if !qemu.trim().is_empty() {
-            opciones.qemu_nbd = Some(PathBuf::from(qemu));
+            opciones.qemu_nbd = Some(PathBuf::from(qemu.trim()));
+        }
+    }
+    #[cfg(windows)]
+    if opciones.qemu_nbd.is_none() {
+        let default_win = PathBuf::from(r"C:\Program Files\qemu\qemu-nbd.exe");
+        if default_win.is_file() {
+            opciones.qemu_nbd = Some(default_win);
         }
     }
     if let Some(kb) = config.tamano_chunk_kb {
@@ -320,6 +328,7 @@ fn descubrir_imagenes(
     origen: &Path,
     supervision: &mut Supervision,
     app: Option<&AppHandle>,
+    exclusiones: &crate::clasificacion::ExclusionesConfig,
 ) -> Result<Vec<PathBuf>, String> {
     if !origen.exists() {
         return Err(format!(
@@ -398,10 +407,28 @@ fn descubrir_imagenes(
                 Err(_) => continue,
             };
 
+            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+
             if file_type.is_dir() {
+                if exclusiones.es_carpeta_excluida(file_name) {
+                    supervision.registrar_log(
+                        "info",
+                        "",
+                        format!(
+                            "Directorio omitido por regla de exclusión: {}",
+                            path.display()
+                        ),
+                    );
+                    continue;
+                }
                 cola.push_back(path);
-            } else if file_type.is_file() && vmspect::is_vm_image(&path) {
-                imagenes.push(path);
+            } else if file_type.is_file() {
+                if exclusiones.es_archivo_excluido(file_name) {
+                    continue;
+                }
+                if vmspect::is_vm_image(&path) {
+                    imagenes.push(path);
+                }
             }
         }
     }
@@ -457,23 +484,26 @@ pub fn ejecutar_relevamiento(
         "Preparando motor de inspección de discos...".to_string(),
     );
 
-    // --- Fase 1: descubrimiento de imágenes ----------------------------------
+    // --- Fase 1: descubrimiento de imágenes con reglas de exclusión --------
+    let reglas = ReglasClasificacion::cargar(config.ruta_reglas.as_deref());
+
     supervision.emitir(
         app,
         "escaneando_directorio",
         format!("Escaneando «{ruta_origen}» en busca de imágenes de disco..."),
     );
-    let imagenes = match descubrir_imagenes(&origen, &mut supervision, Some(app)) {
-        Ok(lista) => lista,
-        Err(e) => {
-            supervision.emitir(
-                app,
-                "error",
-                format!("Fallo el escaneo del directorio: {e}"),
-            );
-            return Err(e);
-        }
-    };
+    let imagenes =
+        match descubrir_imagenes(&origen, &mut supervision, Some(app), &reglas.exclusions) {
+            Ok(lista) => lista,
+            Err(e) => {
+                supervision.emitir(
+                    app,
+                    "error",
+                    format!("Fallo el escaneo del directorio: {e}"),
+                );
+                return Err(e);
+            }
+        };
 
     if supervision.cancelada() {
         return Ok(ResumenRelevamiento {
@@ -523,7 +553,6 @@ pub fn ejecutar_relevamiento(
     }
 
     // --- Fase 3: inspección concurrente ---------------------------------------
-    let reglas = ReglasClasificacion::cargar(config.ruta_reglas.as_deref());
     let hilos = config.max_hilos.unwrap_or(4).clamp(1, 16);
     let opciones = construir_opciones(config, &cancelacion);
 
@@ -744,10 +773,19 @@ fn inspeccionar_vm(
         .filter_map(|d| std::fs::metadata(d).ok().map(|m| m.len()))
         .sum();
 
+    // Verificación preventiva de disponibilidad de qemu-nbd para evitar bloqueos por timeout
+    let nbd_disponible = resolver_ruta_qemu_nbd(opciones.qemu_nbd.as_deref()).is_ok();
+    if opciones.force_nbd && !nbd_disponible {
+        observaciones.push("Backend QEMU NBD forzado pero qemu-nbd no está disponible; se omitió el montaje NBD para evitar bloqueos por timeout.".to_string());
+    }
+
     // Inspecciona los discos de mayor a menor hasta hallar el disco del SO.
     'discos: for disco in discos {
         if supervision.cancelada() {
             break;
+        }
+        if opciones.force_nbd && !nbd_disponible {
+            continue 'discos;
         }
         match vmspect::verify_image_integrity(disco) {
             Ok(true) => {}
@@ -768,20 +806,61 @@ fn inspeccionar_vm(
             break 'discos;
         }
 
-        let engine = InspectionEngine::new(opciones.clone());
-        let resultado = engine.inspect_with_progress(disco, |ev| {
+        let (tx_ev, rx_ev) = std::sync::mpsc::channel();
+        let (tx_res, rx_res) = std::sync::mpsc::channel();
+        let disco_copia = disco.clone();
+        let opts = opciones.clone();
+
+        let _hilo = std::thread::Builder::new()
+            .name(format!("vmspect-vm-{indice}"))
+            .spawn(move || {
+                let engine = InspectionEngine::new(opts);
+                let res = engine.inspect_with_progress(&disco_copia, |ev| {
+                    let _ = tx_ev.send(ev);
+                });
+                let _ = tx_res.send(res);
+            });
+
+        let timeout = std::time::Duration::from_secs(5);
+        let mut ultima_actividad = Instant::now();
+        let resultado = loop {
             if supervision.cancelada() {
-                return;
+                break Err(VmSpectError::Cancelled);
             }
-            supervision.actualizar_activa(
-                indice,
-                nombre,
-                &ev.stage,
-                ev.percentage,
-                ev.detail.clone(),
-            );
-            supervision.emitir(app, "analizando_v_ms", format!("Inspeccionando «{nombre}»"));
-        });
+
+            while let Ok(ev) = rx_ev.try_recv() {
+                ultima_actividad = Instant::now();
+                supervision.actualizar_activa(
+                    indice,
+                    nombre,
+                    &ev.stage,
+                    ev.percentage,
+                    ev.detail.clone(),
+                );
+                supervision.emitir(app, "analizando_v_ms", format!("Inspeccionando «{nombre}»"));
+            }
+
+            match rx_res.try_recv() {
+                Ok(res) => break res,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    break Err(VmSpectError::Other(
+                        "El hilo de inspección se desconectó inesperadamente.".into(),
+                    ));
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    if ultima_actividad.elapsed() > timeout {
+                        observaciones.push(format!(
+                            "Timeout de I/O (5s) excedido al intentar leer particiones o registros (Windows\\System32\\config) en {}",
+                            disco.display()
+                        ));
+                        break Err(VmSpectError::Other(
+                            "Timeout de I/O al leer particiones o registros.".into(),
+                        ));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        };
 
         match resultado {
             Ok(reporte) => {
@@ -815,6 +894,8 @@ fn inspeccionar_vm(
         }
     }
 
+    let cat_posesion = deducir_tipo_posesion(carpeta);
+
     match informe {
         Some(reporte) => RegistroVM {
             exitosa: true,
@@ -822,8 +903,11 @@ fn inspeccionar_vm(
             nombre_interno,
             ruta_carpeta: carpeta.display().to_string(),
             propietario: None,
-            tipo_posesion: deducir_tipo_posesion(carpeta),
+            tipo_posesion: cat_posesion.clone(),
             elemento_asignado: None,
+            origen_categoria: cat_posesion,
+            asignado: None,
+            elemento: None,
             sistema_operativo: reporte.guest_info.formatted_os_string(),
             hipervisor: Some(reporte.image.hypervisor.name().to_string()),
             peso_gb: peso_bytes as f64 / GIB,
@@ -839,8 +923,11 @@ fn inspeccionar_vm(
             nombre_interno,
             ruta_carpeta: carpeta.display().to_string(),
             propietario: None,
-            tipo_posesion: deducir_tipo_posesion(carpeta),
+            tipo_posesion: cat_posesion.clone(),
             elemento_asignado: None,
+            origen_categoria: cat_posesion,
+            asignado: None,
+            elemento: None,
             sistema_operativo: "No identificado".to_string(),
             hipervisor: None,
             peso_gb: peso_bytes as f64 / GIB,
@@ -1004,7 +1091,8 @@ mod tests {
         let cancelacion = Arc::new(AtomicBool::new(false));
         let mut supervision = Supervision::new(cancelacion);
         let ruta = Path::new("ruta_que_definitivamente_no_existe_12345678");
-        let resultado = descubrir_imagenes(ruta, &mut supervision, None);
+        let exclusiones = crate::clasificacion::ExclusionesConfig::default();
+        let resultado = descubrir_imagenes(ruta, &mut supervision, None, &exclusiones);
         assert!(resultado.is_err());
     }
 
@@ -1031,11 +1119,50 @@ mod tests {
 
         let cancelacion = Arc::new(AtomicBool::new(false));
         let mut supervision = Supervision::new(cancelacion);
-        let imagenes = descubrir_imagenes(&temp_dir, &mut supervision, None).unwrap();
+        let exclusiones = crate::clasificacion::ExclusionesConfig::default();
+        let imagenes = descubrir_imagenes(&temp_dir, &mut supervision, None, &exclusiones).unwrap();
 
         assert_eq!(imagenes.len(), 2);
         assert!(imagenes.iter().any(|p| p.ends_with("disk1.vmdk")));
         assert!(imagenes.iter().any(|p| p.ends_with("disk2.qcow2")));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_descubrir_imagenes_con_exclusiones() {
+        let temp_dir = std::env::temp_dir().join("vminventory_test_exclusiones");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+        std::fs::create_dir_all(temp_dir.join("Validas")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("$RECYCLE.BIN/Ignorada")).unwrap();
+        std::fs::create_dir_all(temp_dir.join("Temp/Ignorada")).unwrap();
+
+        // Archivos en carpeta válida
+        let mut f1 = File::create(temp_dir.join("Validas/vm1.vmdk")).unwrap();
+        f1.write_all(b"# Disk DescriptorFile\nversion=1\n").unwrap();
+
+        // Archivos en carpetas excluidas
+        let mut f2 = File::create(temp_dir.join("$RECYCLE.BIN/Ignorada/reciclada.vmdk")).unwrap();
+        f2.write_all(b"# Disk DescriptorFile\nversion=1\n").unwrap();
+
+        let mut f3 = File::create(temp_dir.join("Temp/Ignorada/temp.qcow2")).unwrap();
+        f3.write_all(b"QFI\xfb\0\0\0\x03").unwrap();
+
+        // Archivo con extensión excluida en carpeta válida
+        let mut f4 = File::create(temp_dir.join("Validas/archivo.tmp")).unwrap();
+        f4.write_all(b"tmp data").unwrap();
+
+        let exclusiones = crate::clasificacion::ExclusionesConfig {
+            folders: vec!["$RECYCLE.BIN".to_string(), "Temp".to_string()],
+            files: vec!["*.tmp".to_string()],
+        };
+
+        let cancelacion = Arc::new(AtomicBool::new(false));
+        let mut supervision = Supervision::new(cancelacion);
+        let imagenes = descubrir_imagenes(&temp_dir, &mut supervision, None, &exclusiones).unwrap();
+
+        assert_eq!(imagenes.len(), 1);
+        assert!(imagenes[0].ends_with("vm1.vmdk"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -1079,7 +1206,7 @@ mod tests {
             modo_dump: true,
             incluir_system: true,
             forzar_qemu: true,
-            ruta_qemu_img: Some("C:\\qemu\\qemu-img.exe".to_string()),
+            ruta_qemu_nbd: Some("C:\\Program Files\\qemu\\qemu-nbd.exe".to_string()),
             ruta_reglas: None,
             tamano_chunk_kb: Some(2048),
             generar_discrepancias: false,
@@ -1092,7 +1219,10 @@ mod tests {
         assert!(opt.include_system);
         assert!(opt.force_nbd);
         assert_eq!(opt.chunk_size, Some(2048 * 1024));
-        assert_eq!(opt.qemu_nbd, Some(PathBuf::from("C:\\qemu\\qemu-img.exe")));
+        assert_eq!(
+            opt.qemu_nbd,
+            Some(PathBuf::from("C:\\Program Files\\qemu\\qemu-nbd.exe"))
+        );
         assert!(opt.cancel_token.is_some());
     }
 

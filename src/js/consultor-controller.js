@@ -7,6 +7,185 @@
 import { escapeHtml } from './utils.js';
 
 /**
+ * Sanitiza una cadena eliminando espacios y filtrando valores inválidos como null, undefined, '-' o cadenas vacías.
+ *
+ * @param {*} val - Valor a sanitizar.
+ * @returns {string|null} Cadena limpia o null si es inválida.
+ */
+export function sanitizarTexto(val) {
+  if (val === null || val === undefined) return null;
+  const str = String(val).trim();
+  if (
+    !str ||
+    str === '-' ||
+    str.toLowerCase() === 'null' ||
+    str.toLowerCase() === 'undefined'
+  ) {
+    return null;
+  }
+  return str;
+}
+
+/**
+ * Extrae listas de opciones únicas y sanitizadas para Asignado y Elemento a partir de una lista de VMs.
+ *
+ * @param {Array<Object>} listaVMs - Lista de VMs o coincidencias.
+ * @returns {{ opcionesAsignado: string[], opcionesElemento: string[], opcionesPropietario: string[] }}
+ */
+export function extraerOpcionesFiltros(listaVMs = []) {
+  if (!Array.isArray(listaVMs)) {
+    return { opcionesAsignado: [], opcionesElemento: [], opcionesPropietario: [] };
+  }
+
+  const asignadosRaw = listaVMs.map((vm) => {
+    if (!vm) return null;
+    if (vm.asignado) return sanitizarTexto(vm.asignado);
+    const cat = (vm.origen_categoria || vm.tipo_posesion || '').toLowerCase();
+    if (cat.includes('persona')) {
+      return sanitizarTexto(vm.propietario || vm.elemento_asignado);
+    }
+    return null;
+  });
+
+  const elementosRaw = listaVMs.map((vm) => {
+    if (!vm) return null;
+    if (vm.elemento) return sanitizarTexto(vm.elemento);
+    const cat = (vm.origen_categoria || vm.tipo_posesion || '').toLowerCase();
+    if (!cat.includes('persona')) {
+      return sanitizarTexto(vm.elemento_asignado || vm.propietario);
+    }
+    return null;
+  });
+
+  const propietariosRaw = listaVMs.map((vm) => {
+    if (!vm) return null;
+    return sanitizarTexto(vm.elemento_asignado || vm.propietario || vm.asignado || vm.elemento);
+  });
+
+  const opcionesAsignado = [...new Set(asignadosRaw.filter(Boolean))].sort();
+  const opcionesElemento = [...new Set(elementosRaw.filter(Boolean))].sort();
+  const opcionesPropietario = [...new Set(propietariosRaw.filter(Boolean))].sort();
+
+  return {
+    opcionesAsignado,
+    opcionesElemento,
+    opcionesPropietario
+  };
+}
+
+/**
+ * Filtra una colección de VMs o coincidencias de software aplicando todas las condiciones activas con lógica AND.
+ * Aplica normalización case-insensitive y sin espacios (.trim().toLowerCase()).
+ *
+ * @param {Array<Object>} listaVMs - Colección de VMs o registros de software.
+ * @param {Object} filtros - Criterios de filtrado.
+ * @param {string} [filtros.programa] - Nombre o etiqueta de programa.
+ * @param {string} [filtros.vm] - Nombre de VM, nombre interno o ruta.
+ * @param {string} [filtros.version] - Versión de software.
+ * @param {string} [filtros.tipo] - Tipo ('todos', 'Personas', 'Discos', 'Servidores').
+ * @param {string} [filtros.propietario] - Nombre de Asignado o Elemento.
+ * @param {string} [filtros.asignado] - Persona asignada (Personas).
+ * @param {string} [filtros.elemento] - Disco o Servidor físico.
+ * @param {string} [filtros.so] - Sistema operativo.
+ * @param {string} [filtros.categoria] - Categoría funcional.
+ * @param {boolean} [filtros.discrepante] - Filtro de discrepancia.
+ * @returns {Array<Object>} Registros que cumplen todas las condiciones.
+ */
+export function filtrarVirtuales(listaVMs = [], filtros = {}) {
+  if (!Array.isArray(listaVMs)) return [];
+
+  const norm = (s) => (s ? String(s).trim().toLowerCase() : '');
+  const qProg = norm(filtros.programa);
+  const qVm = norm(filtros.vm);
+  const qVer = norm(filtros.version);
+  const qTipo = norm(filtros.tipo);
+  const qProp = norm(filtros.propietario);
+  const qAsig = norm(filtros.asignado);
+  const qElem = norm(filtros.elemento);
+  const qSo = norm(filtros.so);
+  const qCat = norm(filtros.categoria);
+  const fDisc = typeof filtros.discrepante === 'boolean' ? filtros.discrepante : null;
+
+  return listaVMs.filter((item) => {
+    if (!item) return false;
+
+    // 1. Programa o tags
+    if (qProg) {
+      const nombreOk = norm(item.nombre_programa || item.nombre).includes(qProg);
+      const tagsOk = Array.isArray(item.tags) && item.tags.some((t) => norm(t).includes(qProg));
+      const progsOk = Array.isArray(item.programas) && item.programas.some((p) => {
+        const pNom = norm(p.nombre).includes(qProg);
+        const pTags = Array.isArray(p.tags) && p.tags.some((t) => norm(t).includes(qProg));
+        return pNom || pTags;
+      });
+      if (!nombreOk && !tagsOk && !progsOk) return false;
+    }
+
+    // 2. Máquina Virtual (nombre_vm, nombre_interno, ruta_carpeta)
+    if (qVm) {
+      const vmOk = norm(item.nombre_vm).includes(qVm);
+      const intOk = norm(item.nombre_interno).includes(qVm);
+      const rutaOk = norm(item.ruta_carpeta).includes(qVm);
+      if (!vmOk && !intOk && !rutaOk) return false;
+    }
+
+    // 3. Versión
+    if (qVer) {
+      const verItem = norm(item.version);
+      const progVerOk = Array.isArray(item.programas) && item.programas.some((p) => norm(p.version).includes(qVer));
+      if (!verItem.includes(qVer) && !progVerOk) return false;
+    }
+
+    // 4. Tipo / Ubicación / Categoría Origen
+    if (qTipo && qTipo !== 'todos') {
+      const tipoVal = norm(item.origen_categoria || item.tipo_posesion);
+      if (!tipoVal.includes(qTipo)) return false;
+    }
+
+    // 5. Asignado / Elemento genérico (propietario)
+    if (qProp) {
+      const p1 = norm(item.propietario).includes(qProp);
+      const p2 = norm(item.elemento_asignado).includes(qProp);
+      const p3 = norm(item.asignado).includes(qProp);
+      const p4 = norm(item.elemento).includes(qProp);
+      if (!p1 && !p2 && !p3 && !p4) return false;
+    }
+
+    // 6. Asignado específico (Personas)
+    if (qAsig) {
+      const asigVal = norm(item.asignado || item.propietario || item.elemento_asignado);
+      if (!asigVal.includes(qAsig)) return false;
+    }
+
+    // 7. Elemento específico (Discos / Servidores)
+    if (qElem) {
+      const elemVal = norm(item.elemento || item.elemento_asignado || item.propietario);
+      if (!elemVal.includes(qElem)) return false;
+    }
+
+    // 8. Sistema Operativo
+    if (qSo && qSo !== 'todos') {
+      const soVal = norm(item.sistema_operativo);
+      if (!soVal.includes(qSo)) return false;
+    }
+
+    // 9. Categoría funcional
+    if (qCat && qCat !== 'todas') {
+      const catVal = norm(item.categoria);
+      const progCatOk = Array.isArray(item.programas) && item.programas.some((p) => norm(p.categoria) === qCat);
+      if (catVal !== qCat && !progCatOk) return false;
+    }
+
+    // 10. Discrepantes
+    if (fDisc !== null) {
+      if (Boolean(item.discrepante) !== fDisc) return false;
+    }
+
+    return true;
+  });
+}
+
+/**
  * @typedef {Object} FiltrosConsultor
  * @property {string} programa - Consulta por nombre de programa.
  * @property {string} vm - Consulta por nombre de VM o ruta.
@@ -146,48 +325,65 @@ export class ConsultorController {
   }
 
   /**
-   * Puebla los datalists de autocompletado y selectores de filtros.
+   * Puebla los datalists de autocompletado y selectores de filtros con sanitización.
    *
    * @param {string[]} [programas=[]] - Lista de programas disponibles.
    * @param {string[]} [vms=[]] - Lista de VMs disponibles.
    * @param {string[]} [versiones=[]] - Lista de versiones registradas.
    * @param {string[]} [propietarios=[]] - Lista de colaboradores y elementos.
    * @param {string[]} [categorias=[]] - Lista de categorías funcionales de vminspect-rs.
+   * @param {string[]} [asignados=[]] - Lista de personas asignadas.
+   * @param {string[]} [elementos=[]] - Lista de elementos físicos/servidores.
    * @returns {void}
    */
-  poblarSugerencias(programas = [], vms = [], versiones = [], propietarios = [], categorias = []) {
+  poblarSugerencias(
+    programas = [],
+    vms = [],
+    versiones = [],
+    propietarios = [],
+    categorias = [],
+    asignados = [],
+    elementos = []
+  ) {
+    const sanitizarLista = (items) => {
+      if (!Array.isArray(items)) return [];
+      return [...new Set(items.map(sanitizarTexto).filter(Boolean))];
+    };
+
     if (this.dom.datalistProgramas) {
-      this.dom.datalistProgramas.innerHTML = programas
+      this.dom.datalistProgramas.innerHTML = sanitizarLista(programas)
         .slice(0, 200)
         .map(p => `<option value="${escapeHtml(p)}">`)
         .join('');
     }
     if (this.dom.datalistVms) {
-      this.dom.datalistVms.innerHTML = vms
+      this.dom.datalistVms.innerHTML = sanitizarLista(vms)
         .slice(0, 200)
         .map(v => `<option value="${escapeHtml(v)}">`)
         .join('');
     }
     if (this.dom.datalistVersiones) {
-      this.dom.datalistVersiones.innerHTML = versiones
+      this.dom.datalistVersiones.innerHTML = sanitizarLista(versiones)
         .slice(0, 100)
         .map(v => `<option value="${escapeHtml(v)}">`)
         .join('');
     }
     if (this.dom.datalistPropietarios) {
-      this.dom.datalistPropietarios.innerHTML = propietarios
+      const combinados = sanitizarLista([...propietarios, ...asignados, ...elementos]);
+      this.dom.datalistPropietarios.innerHTML = combinados
         .slice(0, 100)
         .map(u => `<option value="${escapeHtml(u)}">`)
         .join('');
     }
     if (this.dom.selectBuscarCategoria && categorias.length > 0) {
       const valorActual = this.dom.selectBuscarCategoria.value;
+      const catsSanitizadas = sanitizarLista(categorias);
       const opts = [
         '<option value="todas">🏷️ Todas las Categorías</option>',
-        ...categorias.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
+        ...catsSanitizadas.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)
       ];
       this.dom.selectBuscarCategoria.innerHTML = opts.join('');
-      if (categorias.includes(valorActual)) {
+      if (catsSanitizadas.includes(valorActual)) {
         this.dom.selectBuscarCategoria.value = valorActual;
       }
     }

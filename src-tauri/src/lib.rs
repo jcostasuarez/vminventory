@@ -51,6 +51,9 @@ pub fn run() {
             ventana_cerrar,
         ])
         .setup(|app| {
+            // Inicialización automática de archivo de reglas si no existe
+            let _ = clasificacion::asegurar_archivo_predeterminado();
+
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.maximize();
                 #[cfg(debug_assertions)]

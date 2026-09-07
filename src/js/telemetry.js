@@ -47,6 +47,22 @@
  */
 
 /**
+ * Convierte una cadena de tiempo formateada (MM:SS o H:MM:SS) a segundos.
+ * @param {string} str
+ * @returns {number}
+ */
+function desformatearDuracion(str) {
+  if (!str || typeof str !== 'string') return 0;
+  const parts = str.split(':').map(p => parseInt(p, 10) || 0);
+  if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  } else if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+  return 0;
+}
+
+/**
  * Gestor de telemetría y visualizador gráfico del motor de análisis multihilo.
  */
 export class TelemetryManager {
@@ -106,6 +122,10 @@ export class TelemetryManager {
     this.canvasOffset = 0;
     this.canvasCtx = this.canvas ? this.canvas.getContext('2d') : null;
 
+    // Cronómetro independiente
+    this.cronometroIntervalId = null;
+    this.tiempoInicioCronometro = null;
+
     if (this.canvas) {
       this.iniciarAnimacionCanvas();
     }
@@ -159,8 +179,27 @@ export class TelemetryManager {
       }
     }
 
-    if (this.statTiempo) {
-      this.statTiempo.textContent = estado.tiempo_transcurrido_formateado || '00:00';
+    const fasesActivas = ['iniciando', 'escaneando_directorio', 'analizando_v_ms', 'generando_reporte'];
+    if (fasesActivas.includes(estado.fase)) {
+      if (!this.cronometroIntervalId) {
+        const segs = desformatearDuracion(estado.tiempo_transcurrido_formateado);
+        this.iniciarCronometro(segs > 0 ? Date.now() - segs * 1000 : Date.now());
+      } else if (estado.tiempo_transcurrido_formateado) {
+        // Re-sincronizar el reloj base si difiere significativamente
+        const segsBackend = desformatearDuracion(estado.tiempo_transcurrido_formateado);
+        const segsActual = Math.floor((Date.now() - this.tiempoInicioCronometro) / 1000);
+        if (Math.abs(segsBackend - segsActual) > 2) {
+          this.tiempoInicioCronometro = Date.now() - segsBackend * 1000;
+        }
+      }
+      this.actualizarTextoCronometro();
+    } else if (estado.fase === 'finalizado' || estado.fase === 'cancelado') {
+      this.detenerCronometro();
+      if (this.statTiempo && estado.tiempo_transcurrido_formateado) {
+        this.statTiempo.textContent = estado.tiempo_transcurrido_formateado;
+      }
+    } else if (this.statTiempo && estado.tiempo_transcurrido_formateado) {
+      this.statTiempo.textContent = estado.tiempo_transcurrido_formateado;
     }
 
     const lblTiempoSub = document.getElementById('lblTiempoSub');
@@ -229,6 +268,57 @@ export class TelemetryManager {
     if (config?.habilitar_bitacora && estado.logs_recientes && estado.logs_recientes.length > 0) {
       this.renderLogs(estado.logs_recientes);
     }
+  }
+
+  /**
+   * Inicia el cronómetro independiente que actualiza la UI estrictamente cada 1 segundo.
+   * @param {number} [tiempoInicioMs] - Marca temporal en ms del inicio. Si no se provee, usa Date.now().
+   */
+  iniciarCronometro(tiempoInicioMs = Date.now()) {
+    this.detenerCronometro();
+    this.tiempoInicioCronometro = tiempoInicioMs;
+    this.actualizarTextoCronometro();
+    this.cronometroIntervalId = setInterval(() => {
+      this.actualizarTextoCronometro();
+    }, 1000);
+    if (typeof this.cronometroIntervalId?.unref === 'function') {
+      this.cronometroIntervalId.unref();
+    }
+  }
+
+  /**
+   * Detiene el cronómetro independiente si está activo.
+   */
+  detenerCronometro() {
+    if (this.cronometroIntervalId) {
+      clearInterval(this.cronometroIntervalId);
+      this.cronometroIntervalId = null;
+    }
+  }
+
+  /**
+   * Actualiza el elemento DOM del tiempo transcurrido basándose en el tiempo exacto transcurrido.
+   */
+  actualizarTextoCronometro() {
+    if (!this.statTiempo || !this.tiempoInicioCronometro) return;
+    const segundos = Math.max(0, Math.floor((Date.now() - this.tiempoInicioCronometro) / 1000));
+    this.statTiempo.textContent = this.formatearDuracion(segundos);
+  }
+
+  /**
+   * Formatea una duración en segundos a string MM:SS o H:MM:SS.
+   * @param {number} segundos
+   * @returns {string}
+   */
+  formatearDuracion(segundos) {
+    const s = Math.max(0, Number(segundos) || 0);
+    const hrs = Math.floor(s / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    const secs = s % 60;
+    if (hrs > 0) {
+      return `${hrs}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    }
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
 
   /**

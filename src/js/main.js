@@ -80,7 +80,9 @@ async function ejecutarConsultaSoftware() {
         resultado.vms_disponibles,
         resultado.versiones_disponibles,
         resultado.propietarios_disponibles,
-        resultado.categorias_disponibles || []
+        resultado.categorias_disponibles || [],
+        resultado.asignados_disponibles || [],
+        resultado.elementos_disponibles || []
       );
       ui.renderResultadosSoftware(
         resultado,
@@ -524,14 +526,14 @@ if (ui.btnGuardarConfigConsultor) {
   });
 }
 
-// Selector de binario qemu-img en Configuración del Analizador
+// Selector de binario qemu-nbd en Configuración del Analizador
 if (ui.btnExaminarQemu) {
   ui.btnExaminarQemu.addEventListener('click', async () => {
     try {
       const selected = await open({
         directory: false,
         multiple: false,
-        title: "Seleccionar binario ejecutable qemu-img"
+        title: "Seleccionar binario ejecutable qemu-nbd"
       });
       if (selected && ui.cfgRutaQemu) {
         ui.cfgRutaQemu.value = selected;
@@ -563,15 +565,15 @@ if (ui.btnRestablecerAjustes) {
   });
 }
 
-// Selector de archivo reglas.toml personalizado
+// Selector de archivo de reglas (rules.json / rules.toml) personalizado
 if (ui.btnExaminarReglas) {
   ui.btnExaminarReglas.addEventListener('click', async () => {
     try {
       const selected = await open({
         directory: false,
         multiple: false,
-        title: "Seleccionar archivo de reglas TOML para vminspect-rs",
-        filters: [{ name: "Reglas TOML", extensions: ["toml"] }]
+        title: "Seleccionar archivo de reglas de clasificación",
+        filters: [{ name: "Reglas de Clasificación (*.json, *.toml)", extensions: ["json", "toml"] }]
       });
       if (selected && ui.cfgRutaReglas) {
         ui.cfgRutaReglas.value = selected;

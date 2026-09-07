@@ -241,11 +241,17 @@ export class GraphView {
         const vmId = `vm:${vmKey}`;
 
         // Deducir tipo de entidad para el nodo de asignación
-        let tipoPos = (item.tipo_posesion || 'Personas').trim();
+        let tipoPos = (item.origen_categoria || item.tipo_posesion || 'Personas').trim();
         let tipoLower = tipoPos.toLowerCase();
         let entityType = 'owner';
         let entitySub = 'Persona Asignada';
-        let elemName = item.elemento_asignado || item.propietario || 'Desconocido';
+        let elemName =
+          (tipoLower.includes('persona') ? (item.asignado || item.propietario) : (item.elemento || item.elemento_asignado)) ||
+          item.elemento_asignado ||
+          item.propietario ||
+          item.asignado ||
+          item.elemento ||
+          'Desconocido';
 
         if (tipoLower.includes('disco')) {
           entityType = 'disk_entity';
@@ -588,8 +594,14 @@ export class GraphView {
       case 'vm': {
         const vm = node.data;
         const { disco, ubicacion } = extraerInfoDisco(vm.ruta_carpeta);
-        const elemAsignado = vm.elemento_asignado || vm.propietario || 'Desconocido';
-        const tipoP = vm.tipo_posesion || 'Persona';
+        const tipoP = vm.origen_categoria || vm.tipo_posesion || 'Persona';
+        const elemAsignado =
+          (tipoP.toLowerCase().includes('persona') ? (vm.asignado || vm.propietario) : (vm.elemento || vm.elemento_asignado)) ||
+          vm.elemento_asignado ||
+          vm.propietario ||
+          vm.asignado ||
+          vm.elemento ||
+          'Desconocido';
         return `
           <div class="tooltip-title">🖥️ Máquina Virtual: ${title}</div>
           <div class="tooltip-row"><span>Versión soft:</span> <strong>${escapeHtml(vm.version || 'N/A')}</strong></div>
@@ -642,8 +654,14 @@ export class GraphView {
     if (node.type === 'vm') {
       const vm = node.data;
       const { disco, ubicacion } = extraerInfoDisco(vm.ruta_carpeta);
-      const elemAsignado = vm.elemento_asignado || vm.propietario || 'Desconocido';
-      const tipoP = vm.tipo_posesion || 'Persona';
+      const tipoP = vm.origen_categoria || vm.tipo_posesion || 'Persona';
+      const elemAsignado =
+        (tipoP.toLowerCase().includes('persona') ? (vm.asignado || vm.propietario) : (vm.elemento || vm.elemento_asignado)) ||
+        vm.elemento_asignado ||
+        vm.propietario ||
+        vm.asignado ||
+        vm.elemento ||
+        'Desconocido';
       bodyHtml = `
         <div class="drawer-field-row">
           <span class="drawer-field-label">Máquina Virtual:</span>
@@ -664,11 +682,11 @@ export class GraphView {
           <span class="drawer-field-value">${escapeHtml(vm.editor)}</span>
         </div>` : ''}
         <div class="drawer-field-row">
-          <span class="drawer-field-label">Tipo de Posesión:</span>
+          <span class="drawer-field-label">Tipo / Categoría:</span>
           <span class="drawer-field-value">${escapeHtml(tipoP)}</span>
         </div>
         <div class="drawer-field-row">
-          <span class="drawer-field-label">Asignado a / Elemento:</span>
+          <span class="drawer-field-label">Asignado / Elemento:</span>
           <span class="drawer-field-value"><strong>${escapeHtml(elemAsignado)}</strong></span>
         </div>
         <div class="drawer-field-row">

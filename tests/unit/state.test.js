@@ -23,7 +23,7 @@ describe('Estado y Configuración (state.js)', () => {
     appState.guardar({
       max_hilos: 8,
       modo_dump: true,
-      ruta_qemu_img: 'C:\\qemu\\qemu-img.exe',
+      ruta_qemu_nbd: 'C:\\Program Files\\qemu\\qemu-nbd.exe',
       nombre_archivo_salida: 'MiReportePersonalizado.json'
     });
 
@@ -76,7 +76,7 @@ describe('Estado y Configuración (state.js)', () => {
       modo_dump: true,
       incluir_system: false,
       forzar_qemu: true,
-      ruta_qemu_img: 'C:\\qemu\\qemu-img.exe',
+      ruta_qemu_nbd: 'C:\\Program Files\\qemu\\qemu-nbd.exe',
       ruta_reglas: '',
       tamano_chunk_kb: 512,
       generar_discrepancias: true,
@@ -91,7 +91,7 @@ describe('Estado y Configuración (state.js)', () => {
       modo_dump: true,
       incluir_system: false,
       forzar_qemu: true,
-      ruta_qemu_img: 'C:\\qemu\\qemu-img.exe',
+      ruta_qemu_nbd: 'C:\\Program Files\\qemu\\qemu-nbd.exe',
       ruta_reglas: null,
       tamano_chunk_kb: 512,
       generar_discrepancias: true,

@@ -668,7 +668,8 @@ body {
   width: 0%;
   background: var(--primary);
   border-radius: 9999px;
-  transition: width 0.2s ease;
+  transition: width 0.5s ease-in-out;
+  will-change: width;
 }
 
 .progress-fill.finished {

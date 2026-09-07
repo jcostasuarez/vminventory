@@ -178,11 +178,11 @@ export class CardsView {
       ? `<div class="consultor-tags-wrapper">${item.tags.map(t => `<span class="consultor-tag-pill">#${escapeHtml(t)}</span>`).join('')}</div>`
       : '';
 
-    // Configurar etiqueta y estilo según Tipo de Posesión (Persona, Disco, Servidor)
+    // Configurar etiqueta y estilo según Tipo de Posesión / Origen de Categoría (Persona, Disco, Servidor)
     let tagCls = 'badge-persona';
     let iconSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
     let tipoNombre = 'Persona';
-    const tipoLower = (item.tipo_posesion || '').toLowerCase();
+    const tipoLower = (item.origen_categoria || item.tipo_posesion || '').toLowerCase();
 
     if (tipoLower.includes('disco')) {
       tagCls = 'badge-disco';
@@ -194,7 +194,13 @@ export class CardsView {
       iconSvg = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>';
     }
 
-    const elementoMostrar = item.elemento_asignado || item.propietario || 'Desconocido';
+    const elementoMostrar =
+      (tipoNombre === 'Persona' ? (item.asignado || item.propietario) : (item.elemento || item.elemento_asignado)) ||
+      item.elemento_asignado ||
+      item.propietario ||
+      item.asignado ||
+      item.elemento ||
+      'Desconocido';
     const posesionTag = `
       <span class="consultor-possession-badge ${tagCls}" title="Ubicación y tenencia asignada">
         ${iconSvg}

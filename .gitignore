@@ -2,24 +2,47 @@
 # VM Inventory - .gitignore
 # =============================================================================
 
-# --- Node.js & Frontend ---
-node_modules/
+# --- Artefactos de Compilación & Frontend ---
 dist/
 dist-ssr/
+build/
+target/
+src-tauri/target/
+node_modules/
 .pnp
 .pnp.js
 coverage/
 *.local
+*.spec
 
-# --- Rust & Cargo ---
-/target/
-src-tauri/target/
+# --- Rust, Cargo & Compilados Binarios ---
 **/*.rs.bk
 *.pdb
+*.exe
+*.msi
+*.dll
+*.dylib
+*.so
+
+# --- Entornos Virtuales & Python ---
+.venv/
+venv/
+env/
+ENV/
+__pycache__/
+*.pyc
 
 # --- Tauri Generated ---
 src-tauri/gen/schemas/
 src-tauri/gen/
+
+# --- Bases de Datos Temporales & Salidas ---
+*.db
+*.sqlite
+*.sqlite3
+relevamiento_*.json
+resultado_*.json
+informe_*.json
 
 # --- Environment & Secrets ---
 .env
@@ -50,7 +73,7 @@ pnpm-debug.log*
 *.swo
 *~
 
-# --- Operating System Files ---
+# --- Carpetas y Archivos del Sistema Operativo ---
 .DS_Store
 .DS_Store?
 ._*
@@ -58,4 +81,7 @@ pnpm-debug.log*
 .Trashes
 ehthumbs.db
 Thumbs.db
+[Tt]humbs.db
 desktop.ini
+$RECYCLE.BIN/
+System Volume Information/

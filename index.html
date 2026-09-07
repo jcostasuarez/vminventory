@@ -631,7 +631,7 @@
                 <strong id="lblInspBytesLeidos">-</strong>
               </div>
               <div class="inspector-data-item">
-                <span class="inspector-data-label">Invocaciones qemu-img:</span>
+                <span class="inspector-data-label">Invocaciones qemu-nbd:</span>
                 <strong id="lblInspQemuCalls">-</strong>
               </div>
             </div>
@@ -800,29 +800,29 @@
         <label class="form-checkbox-row">
           <input type="checkbox" id="cfgForzarQemu" />
           <div>
-            <div class="form-checkbox-label">Forzar Backend QEMU (forzar_qemu)</div>
-            <div class="form-help">Obliga a utilizar el binario qemu-img en todos los formatos de disco</div>
+            <div class="form-checkbox-label">Forzar Backend QEMU NBD (forzar_qemu)</div>
+            <div class="form-help">Obliga a utilizar el binario qemu-nbd en todos los formatos de disco</div>
           </div>
         </label>
 
         <div class="form-field">
-          <label class="form-label" for="cfgRutaQemu">Ruta Personalizada del Binario qemu-img (Opcional):</label>
+          <label class="form-label" for="cfgRutaQemu">Ruta Personalizada del Binario qemu-nbd (Opcional):</label>
           <div style="display: flex; gap: 8px;">
             <input type="text" id="cfgRutaQemu" class="form-input" placeholder="Dejar vacío para detección automática en PATH..." style="flex: 1;" />
             <button class="step-btn" id="btnExaminarQemu" type="button">Examinar...</button>
-            <button class="step-btn" id="btnValidarQemu" type="button" title="Comprobar si el binario qemu-img es ejecutable y funcional">Validar QEMU</button>
+            <button class="step-btn" id="btnValidarQemu" type="button" title="Comprobar si el binario qemu-nbd es ejecutable y funcional">Validar qemu-nbd</button>
           </div>
           <div id="lblEstadoValidacionQemu" style="font-size: 11px; margin-top: 4px; color: var(--text-muted);"></div>
         </div>
 
         <div class="form-field">
-          <label class="form-label" for="cfgRutaReglas">Ruta Personalizada de Reglas TOML (reglas.toml):</label>
+          <label class="form-label" for="cfgRutaReglas">Ruta Personalizada de Reglas (rules.json / rules.toml):</label>
           <div style="display: flex; gap: 8px;">
-            <input type="text" id="cfgRutaReglas" class="form-input" placeholder="Dejar vacío para usar reglas.toml por defecto..." style="flex: 1;" />
+            <input type="text" id="cfgRutaReglas" class="form-input" placeholder="Dejar vacío para usar rules.json por defecto..." style="flex: 1;" />
             <button class="step-btn" id="btnExaminarReglas" type="button">Examinar...</button>
-            <button class="step-btn" id="btnOpenSimuladorReglas" type="button" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="Abrir simulador para probar cómo clasifica vminspect-rs una aplicación">Simulador de Reglas</button>
+            <button class="step-btn" id="btnOpenSimuladorReglas" type="button" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="Abrir simulador para probar cómo clasifica VM Inventory una aplicación">Simulador de Reglas</button>
           </div>
-          <div class="form-help">Permite personalizar categorías industriales, palabras clave y listas de exclusión.</div>
+          <div class="form-help">Permite personalizar categorías industriales, software, palabras clave y listas de exclusión de carpetas y archivos.</div>
         </div>
 
         <div class="form-field">

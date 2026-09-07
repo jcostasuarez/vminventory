@@ -1,0 +1,540 @@
+{
+  "version": "2.0.0",
+  "exclusions": {
+    "folders": [
+      "System Volume Information",
+      "$RECYCLE.BIN",
+      "$Recycle.Bin",
+      "RECYCLER",
+      "Temp",
+      "tmp",
+      "$WinREAgent",
+      ".git",
+      ".svn",
+      "node_modules"
+    ],
+    "files": [
+      "*.tmp",
+      "*.temp",
+      "*.pagefile",
+      "*.sys",
+      "*.log",
+      "*.iso",
+      "*.bak",
+      "*.swp"
+    ]
+  },
+  "classifications": [
+    {
+      "vendor": "Siemens",
+      "software": "SIMATIC STEP 7",
+      "patterns": [
+        "s7dbg.exe",
+        "s7tgtopx.exe",
+        "*Step7*",
+        "*Simatic*",
+        "Step 7*"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "siemens", "step7", "industrial"]
+    },
+    {
+      "vendor": "Siemens",
+      "software": "TIA Portal",
+      "patterns": [
+        "*TIA Portal*",
+        "*Siemens.Automation.Portal*",
+        "Siemens.Automation.Portal.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "hmi", "scada", "siemens", "tia-portal"]
+    },
+    {
+      "vendor": "Siemens",
+      "software": "SIMATIC WinCC",
+      "patterns": [
+        "*WinCC*",
+        "*SIMATIC WinCC*",
+        "WinCCExplorer.exe"
+      ],
+      "category": "SCADA & HMI",
+      "tags": ["scada", "hmi", "siemens", "wincc"]
+    },
+    {
+      "vendor": "Rockwell Automation",
+      "software": "Studio 5000 Logix Designer",
+      "patterns": [
+        "*Studio 5000*",
+        "*Studio 5K*",
+        "*LogixDesigner*",
+        "LogixDesigner.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "rockwell", "allen-bradley", "studio5000"]
+    },
+    {
+      "vendor": "Rockwell Automation",
+      "software": "RSLogix 500 / 5000",
+      "patterns": [
+        "*RSLogix 500*",
+        "*RSLogix 5000*",
+        "*RSLogix*",
+        "rs500.exe",
+        "rs5000.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "rockwell", "allen-bradley", "rslogix"]
+    },
+    {
+      "vendor": "Rockwell Automation",
+      "software": "FactoryTalk View",
+      "patterns": [
+        "*FactoryTalk*",
+        "*FactoryTalk View*",
+        "FTViewStudio.exe",
+        "FTViewME.exe"
+      ],
+      "category": "SCADA & HMI",
+      "tags": ["scada", "hmi", "rockwell", "factorytalk"]
+    },
+    {
+      "vendor": "Schneider Electric",
+      "software": "EcoStruxure Control Expert (Unity Pro)",
+      "patterns": [
+        "*EcoStruxure*",
+        "*Unity Pro*",
+        "*Schneider Electric*",
+        "UnityPro.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "schneider", "modicon", "unity-pro"]
+    },
+    {
+      "vendor": "Schneider Electric",
+      "software": "Citect SCADA / Plant SCADA",
+      "patterns": [
+        "*Citect*",
+        "*Plant SCADA*",
+        "Citect32.exe"
+      ],
+      "category": "SCADA & HMI",
+      "tags": ["scada", "schneider", "citect"]
+    },
+    {
+      "vendor": "AVEVA / Wonderware",
+      "software": "InTouch HMI",
+      "patterns": [
+        "*InTouch*",
+        "*Wonderware*",
+        "*AVEVA*",
+        "view.exe",
+        "intouch.exe"
+      ],
+      "category": "SCADA & HMI",
+      "tags": ["scada", "hmi", "wonderware", "aveva"]
+    },
+    {
+      "vendor": "Omron",
+      "software": "Sysmac Studio",
+      "patterns": [
+        "*Sysmac Studio*",
+        "*Sysmac*",
+        "SysmacStudio.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "hmi", "omron", "motion"]
+    },
+    {
+      "vendor": "Omron",
+      "software": "CX-Programmer / CX-One",
+      "patterns": [
+        "*CX-Programmer*",
+        "*CX-One*",
+        "*CX-Supervisor*",
+        "cx-p.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "omron", "cx-one"]
+    },
+    {
+      "vendor": "Mitsubishi Electric",
+      "software": "GX Works2 / GX Works3",
+      "patterns": [
+        "*GX Works*",
+        "*GX Developer*",
+        "*MELSOFT*",
+        "GD3.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "mitsubishi", "melsoft"]
+    },
+    {
+      "vendor": "ABB",
+      "software": "Automation Builder",
+      "patterns": [
+        "*Automation Builder*",
+        "*ABB Control Builder*",
+        "*RobotStudio*"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "robotica", "abb"]
+    },
+    {
+      "vendor": "Beckhoff",
+      "software": "TwinCAT",
+      "patterns": [
+        "*TwinCAT*",
+        "*TC3*",
+        "TcXaeShell.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "beckhoff", "twincat", "softplc"]
+    },
+    {
+      "vendor": "Inductive Automation",
+      "software": "Ignition SCADA",
+      "patterns": [
+        "*Ignition*",
+        "*Ignition Gateway*",
+        "*Inductive Automation*"
+      ],
+      "category": "SCADA & HMI",
+      "tags": ["scada", "hmi", "iiot", "ignition"]
+    },
+    {
+      "vendor": "GE Digital / Emerson",
+      "software": "iFIX / CIMPLICITY / PAC Machine Edition",
+      "patterns": [
+        "*iFIX*",
+        "*CIMPLICITY*",
+        "*Proficy*",
+        "*Machine Edition*"
+      ],
+      "category": "SCADA & HMI",
+      "tags": ["scada", "hmi", "ge", "emerson", "proficy"]
+    },
+    {
+      "vendor": "CODESYS",
+      "software": "CODESYS Development System",
+      "patterns": [
+        "*CODESYS*",
+        "CODESYS.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["plc", "iec61131", "codesys"]
+    },
+    {
+      "vendor": "National Instruments",
+      "software": "LabVIEW",
+      "patterns": [
+        "*LabVIEW*",
+        "*National Instruments*",
+        "LabVIEW.exe"
+      ],
+      "category": "Automatización Industrial",
+      "tags": ["daas", "instrumentacion", "ni", "labview"]
+    }
+  ],
+  "whitelist": [
+    {
+      "nombre": "microsoft office",
+      "editor": "Microsoft",
+      "motivo": "Suite ofimática corporativa estándar."
+    },
+    {
+      "nombre": "microsoft 365",
+      "editor": "Microsoft",
+      "motivo": "Suscripción ofimática corporativa estándar."
+    },
+    {
+      "nombre": "adobe acrobat",
+      "editor": "Adobe",
+      "motivo": "Lector/editor de PDF estándar de la organización."
+    },
+    {
+      "nombre": "autocad",
+      "editor": "Autodesk",
+      "motivo": "Herramienta de diseño asistido (CAD) crítica."
+    },
+    {
+      "nombre": "visual studio",
+      "editor": "Microsoft",
+      "motivo": "Entorno de desarrollo corporativo prioritario."
+    },
+    {
+      "nombre": "sql server",
+      "editor": "Microsoft",
+      "motivo": "Motor de base de datos corporativo prioritario."
+    },
+    {
+      "nombre": "vmware tools",
+      "editor": "VMware",
+      "motivo": "Stack de integración de VMware: revela la plataforma de la VM."
+    },
+    {
+      "nombre": "virtualbox guest additions",
+      "editor": "Oracle",
+      "motivo": "Stack de integración de VirtualBox: revela la plataforma de la VM."
+    },
+    {
+      "nombre": "eset",
+      "editor": "ESET",
+      "motivo": "Endpoint de seguridad corporativo obligatorio."
+    },
+    {
+      "nombre": "kaspersky",
+      "editor": "Kaspersky",
+      "motivo": "Endpoint de seguridad corporativo obligatorio."
+    },
+    {
+      "nombre": "mcafee",
+      "editor": "McAfee",
+      "motivo": "Endpoint de seguridad corporativo obligatorio."
+    },
+    {
+      "nombre": "sophos",
+      "editor": "Sophos",
+      "motivo": "Endpoint de seguridad corporativo obligatorio."
+    },
+    {
+      "nombre": "trend micro",
+      "editor": "Trend Micro",
+      "motivo": "Endpoint de seguridad corporativo obligatorio."
+    },
+    {
+      "nombre": "forticlient",
+      "editor": "Fortinet",
+      "motivo": "Cliente VPN/seguridad corporativo obligatorio."
+    },
+    {
+      "nombre": "globalprotect",
+      "editor": "Palo Alto",
+      "motivo": "Cliente VPN/seguridad corporativo obligatorio."
+    }
+  ],
+  "noise": [
+    {
+      "nombre": "redistributable",
+      "motivo": "Componente redistribuible de runtime (VC++)."
+    },
+    {
+      "nombre": "runtime",
+      "motivo": "Runtime de plataforma (.NET, Java, Edge WebView)."
+    },
+    {
+      "nombre": "microsoft .net framework",
+      "motivo": "Plataforma de ejecución del sistema."
+    },
+    {
+      "nombre": "security update",
+      "motivo": "Parche de seguridad del sistema operativo."
+    },
+    {
+      "nombre": "update for microsoft",
+      "motivo": "Actualización no acumulativa del sistema."
+    },
+    {
+      "nombre": "hotfix",
+      "motivo": "Parche puntual del sistema operativo."
+    },
+    {
+      "nombre": "language pack",
+      "motivo": "Paquete de idioma del sistema operativo."
+    },
+    {
+      "nombre": "language feature",
+      "motivo": "Componente de idioma del sistema operativo."
+    },
+    {
+      "nombre": "driver",
+      "motivo": "Controlador de dispositivo del sistema."
+    },
+    {
+      "nombre": "intel(r)",
+      "motivo": "Controlador/utilidad de hardware Intel."
+    },
+    {
+      "nombre": "nvidia",
+      "motivo": "Controlador/utilidad de hardware NVIDIA."
+    },
+    {
+      "nombre": "realtek",
+      "motivo": "Controlador/utilidad de hardware Realtek."
+    },
+    {
+      "nombre": "google update",
+      "motivo": "Servicio actualizador en segundo plano."
+    },
+    {
+      "nombre": "microsoft edge update",
+      "motivo": "Servicio actualizador en segundo plano."
+    },
+    {
+      "nombre": "edge webview",
+      "motivo": "Componente WebView del sistema."
+    },
+    {
+      "nombre": "mozilla maintenance service",
+      "motivo": "Servicio actualizador en segundo plano."
+    }
+  ],
+  "categories": [
+    {
+      "nombre": "Navegadores",
+      "patrones": [
+        "chrome",
+        "firefox",
+        "microsoft edge",
+        "opera",
+        "brave",
+        "vivaldi"
+      ],
+      "tags": ["navegador", "internet"]
+    },
+    {
+      "nombre": "Ofimática",
+      "patrones": [
+        "office",
+        "word",
+        "excel",
+        "powerpoint",
+        "outlook",
+        "access",
+        "libreoffice",
+        "visio",
+        "project",
+        "onedrive",
+        "teams"
+      ],
+      "tags": ["ofimatica"]
+    },
+    {
+      "nombre": "Desarrollo e Ingeniería",
+      "patrones": [
+        "visual studio",
+        "visual studio code",
+        "vscode",
+        "intellij",
+        "pycharm",
+        "eclipse",
+        "netbeans",
+        "android studio",
+        "github",
+        "gitlab",
+        "sourcetree",
+        "tortoisesvn",
+        "python",
+        "jdk",
+        "java",
+        "node.js",
+        "nodejs",
+        "docker",
+        "postman",
+        "notepad++",
+        "sublime",
+        "winscp",
+        "putty",
+        "filezilla",
+        "virtualbox",
+        "vmware workstation"
+      ],
+      "tags": ["desarrollo", "ingenieria"]
+    },
+    {
+      "nombre": "Seguridad y VPN",
+      "patrones": [
+        "antivirus",
+        "eset",
+        "kaspersky",
+        "mcafee",
+        "sophos",
+        "avast",
+        "avg",
+        "malwarebytes",
+        "norton",
+        "bitdefender",
+        "defender",
+        "symantec",
+        "forticlient",
+        "openvpn",
+        "cisco anyconnect",
+        "globalprotect"
+      ],
+      "tags": ["seguridad", "vpn"]
+    },
+    {
+      "nombre": "Servidores y Bases de Datos",
+      "patrones": [
+        "sql server",
+        "mysql",
+        "postgresql",
+        "mongodb",
+        "mariadb",
+        "oracle database",
+        "oracle client",
+        "dbeaver",
+        "heidisql",
+        "xampp",
+        "apache",
+        "nginx",
+        "iis",
+        "filezilla server"
+      ],
+      "tags": ["base-datos", "servidor"]
+    },
+    {
+      "nombre": "Multimedia y Diseño",
+      "patrones": [
+        "vlc",
+        "k-lite",
+        "spotify",
+        "itunes",
+        "gimp",
+        "audacity",
+        "obs studio",
+        "adobe photoshop",
+        "adobe illustrator",
+        "adobe premiere",
+        "adobe after effects",
+        "paint.net",
+        "handbrake",
+        "ffmpeg",
+        "inkscape",
+        "blender"
+      ],
+      "tags": ["multimedia", "diseno"]
+    },
+    {
+      "nombre": "Utilidades",
+      "patrones": [
+        "7-zip",
+        "7zip",
+        "winrar",
+        "teamviewer",
+        "anydesk",
+        "ccleaner",
+        "adobe reader",
+        "acrobat reader",
+        "windirstat",
+        "treesize",
+        "everything",
+        "snipping tool"
+      ],
+      "tags": ["utilidades"]
+    },
+    {
+      "nombre": "Comunicaciones",
+      "patrones": [
+        "zoom",
+        "slack",
+        "discord",
+        "skype",
+        "whatsapp",
+        "telegram",
+        "webex",
+        "goto"
+      ],
+      "tags": ["comunicaciones"]
+    }
+  ]
+}

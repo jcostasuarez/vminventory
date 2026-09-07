@@ -127,8 +127,8 @@ pub struct ConfiguracionApp {
     pub incluir_system: bool,
     #[serde(default)]
     pub forzar_qemu: bool,
-    #[serde(default)]
-    pub ruta_qemu_img: Option<String>,
+    #[serde(default, alias = "ruta_qemu_img")]
+    pub ruta_qemu_nbd: Option<String>,
     #[serde(default)]
     pub ruta_reglas: Option<String>,
     #[serde(default)]
@@ -289,6 +289,12 @@ pub struct InfoReglas {
     pub origen_reglas: String,
     pub total_whitelist: usize,
     pub categorias: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub total_clasificaciones: usize,
+    #[serde(default)]
+    pub total_exclusiones_carpetas: usize,
+    #[serde(default)]
+    pub total_exclusiones_archivos: usize,
 }
 
 /// Resultado de la simulación de clasificación (`probar_clasificacion_software`).
@@ -311,15 +317,28 @@ pub struct RegistroVM {
     /// `true` si al menos un disco produjo un informe válido.
     pub exitosa: bool,
     pub nombre_vm: String,
+    #[serde(default)]
     pub nombre_interno: Option<String>,
     pub ruta_carpeta: String,
+    #[serde(default)]
     pub propietario: Option<String>,
+    #[serde(default)]
     pub tipo_posesion: Option<String>,
+    #[serde(default)]
     pub elemento_asignado: Option<String>,
+    #[serde(default)]
+    pub origen_categoria: Option<String>,
+    #[serde(default)]
+    pub asignado: Option<String>,
+    #[serde(default)]
+    pub elemento: Option<String>,
     pub sistema_operativo: String,
+    #[serde(default)]
     pub hipervisor: Option<String>,
     pub peso_gb: f64,
+    #[serde(default)]
     pub discrepante: bool,
+    #[serde(default)]
     pub observaciones: Vec<String>,
     pub fecha_relevamiento: String,
     pub programas: Vec<ProgramaClasificado>,
@@ -390,9 +409,13 @@ pub struct CoincidenciaSoftware {
     pub propietario: Option<String>,
     pub tipo_posesion: Option<String>,
     pub elemento_asignado: Option<String>,
+    pub origen_categoria: Option<String>,
+    pub asignado: Option<String>,
+    pub elemento: Option<String>,
     pub sistema_operativo: String,
     pub peso_gb: f64,
     pub hipervisor: Option<String>,
+    pub discrepante: Option<bool>,
     pub archivo_json: String,
     pub fecha_relevamiento: String,
 }
@@ -407,6 +430,10 @@ pub struct ResultadoConsultaSoftware {
     pub vms_disponibles: Vec<String>,
     pub versiones_disponibles: Vec<String>,
     pub propietarios_disponibles: Vec<String>,
+    #[serde(default)]
+    pub asignados_disponibles: Vec<String>,
+    #[serde(default)]
+    pub elementos_disponibles: Vec<String>,
     pub tipos_disponibles: Vec<String>,
     pub categorias_disponibles: Vec<String>,
     pub tags_disponibles: Vec<String>,
@@ -425,7 +452,8 @@ pub struct DiagnosticoSistema {
     pub arquitectura: String,
     pub hilos_cpu: usize,
     pub hilos_recomendados: usize,
-    pub qemu_img_disponible: bool,
+    #[serde(default, alias = "qemu_img_disponible")]
+    pub qemu_nbd_disponible: bool,
 }
 
 /// Resultado de la validación del binario QEMU (`validar_binario_qemu`).
@@ -484,7 +512,7 @@ mod tests {
             "modo_dump": true,
             "incluir_system": true,
             "forzar_qemu": false,
-            "ruta_qemu_img": "/usr/bin/qemu-img",
+            "ruta_qemu_nbd": "/usr/bin/qemu-nbd",
             "ruta_reglas": null,
             "tamano_chunk_kb": 1024,
             "generar_discrepancias": true,
@@ -499,7 +527,7 @@ mod tests {
         assert!(config.modo_dump);
         assert!(config.incluir_system);
         assert!(!config.forzar_qemu);
-        assert_eq!(config.ruta_qemu_img.as_deref(), Some("/usr/bin/qemu-img"));
+        assert_eq!(config.ruta_qemu_nbd.as_deref(), Some("/usr/bin/qemu-nbd"));
         assert_eq!(config.ruta_reglas, None);
         assert_eq!(config.tamano_chunk_kb, Some(1024));
         assert!(config.generar_discrepancias);
@@ -535,6 +563,9 @@ mod tests {
                 propietario: Some("Juan".to_string()),
                 tipo_posesion: Some("Personas".to_string()),
                 elemento_asignado: Some("Juan".to_string()),
+                origen_categoria: Some("Personas".to_string()),
+                asignado: Some("Juan".to_string()),
+                elemento: None,
                 sistema_operativo: "Windows 10 Pro".to_string(),
                 hipervisor: Some("VMware".to_string()),
                 peso_gb: 25.5,
@@ -543,10 +574,10 @@ mod tests {
                 fecha_relevamiento: "2026-09-07".to_string(),
                 programas: vec![ProgramaClasificado {
                     nombre: "PostgreSQL 15".to_string(),
-                    version: Some("15.2".to_string()),
-                    editor: Some("PostgreSQL Global Development Group".to_string()),
+                    version: Some("15.3".to_string()),
+                    editor: Some("PostgreSQL".to_string()),
                     categoria: Some("Bases de datos".to_string()),
-                    tags: vec!["db".to_string(), "sql".to_string()],
+                    tags: vec!["db".to_string()],
                     relevante: true,
                 }],
                 peso_bytes: 27380416512,
@@ -624,7 +655,7 @@ mod tests {
             arquitectura: "x86_64".to_string(),
             hilos_cpu: 16,
             hilos_recomendados: 8,
-            qemu_img_disponible: true,
+            qemu_nbd_disponible: true,
         };
         let diag_json = serde_json::to_string(&diag).unwrap();
         let diag_res: DiagnosticoSistema = serde_json::from_str(&diag_json).unwrap();
@@ -632,16 +663,13 @@ mod tests {
 
         let qemu_val = ResultadoValidacionQemu {
             es_valido: true,
-            version_info: Some("qemu-img version 8.2.0".to_string()),
-            ruta_resuelta: Some("C:\\qemu\\qemu-img.exe".to_string()),
+            version_info: Some("qemu-nbd 8.2.0".to_string()),
+            ruta_resuelta: Some("C:\\Program Files\\qemu\\qemu-nbd.exe".to_string()),
             error: None,
         };
         let qemu_json = serde_json::to_string(&qemu_val).unwrap();
         let qemu_res: ResultadoValidacionQemu = serde_json::from_str(&qemu_json).unwrap();
         assert!(qemu_res.es_valido);
-        assert_eq!(
-            qemu_res.version_info.as_deref(),
-            Some("qemu-img version 8.2.0")
-        );
+        assert_eq!(qemu_res.version_info.as_deref(), Some("qemu-nbd 8.2.0"));
     }
 }

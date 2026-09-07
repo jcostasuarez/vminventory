@@ -417,7 +417,7 @@ export class UIManager {
     if (this.cfgModoDump) this.cfgModoDump.checked = Boolean(config.modo_dump);
     if (this.cfgIncluirSystem) this.cfgIncluirSystem.checked = Boolean(config.incluir_system);
     if (this.cfgForzarQemu) this.cfgForzarQemu.checked = Boolean(config.forzar_qemu);
-    if (this.cfgRutaQemu) this.cfgRutaQemu.value = config.ruta_qemu_img || '';
+    if (this.cfgRutaQemu) this.cfgRutaQemu.value = config.ruta_qemu_nbd || config.ruta_qemu_img || '';
     if (this.cfgRutaReglas) this.cfgRutaReglas.value = config.ruta_reglas || '';
     if (this.cfgTamanoChunk) this.cfgTamanoChunk.value = config.tamano_chunk_kb || '';
     if (this.cfgGenerarDiscrepancias) this.cfgGenerarDiscrepancias.checked = Boolean(config.generar_discrepancias);
@@ -444,7 +444,7 @@ export class UIManager {
       modo_dump: this.cfgModoDump.checked,
       incluir_system: this.cfgIncluirSystem.checked,
       forzar_qemu: this.cfgForzarQemu.checked,
-      ruta_qemu_img: this.cfgRutaQemu.value.trim() || '',
+      ruta_qemu_nbd: this.cfgRutaQemu.value.trim() || '',
       ruta_reglas: this.cfgRutaReglas ? this.cfgRutaReglas.value.trim() : '',
       tamano_chunk_kb: (!isNaN(chunk) && chunk > 0) ? chunk : null,
       generar_discrepancias: this.cfgGenerarDiscrepancias.checked,
@@ -471,7 +471,8 @@ export class UIManager {
    * @param {Object} diag - Datos de diagnóstico obtenidos del backend.
    */
   actualizarDiagnostico(diag) {
-    const qemuText = diag.qemu_img_disponible ? 'qemu-img: OK' : 'qemu-img: No detectado';
+    const nbdDisponible = Boolean(diag?.qemu_nbd_disponible ?? diag?.qemu_img_disponible);
+    const qemuText = nbdDisponible ? 'qemu-nbd: OK' : 'qemu-nbd: No detectado';
     if (this.sysDiagnosticText) {
       this.sysDiagnosticText.textContent = `${diag.equipo_ejecucion} • ${diag.sistema_operativo} (${diag.arquitectura}) • ${diag.hilos_cpu} CPUs • ${qemuText}`;
     }
@@ -497,6 +498,9 @@ export class UIManager {
    */
   setEstadoEjecucion(ejecutando) {
     if (ejecutando) {
+      if (this.telemetryManager) {
+        this.telemetryManager.iniciarCronometro();
+      }
       if (this.lblTitleAccion) this.lblTitleAccion.textContent = 'Cancelar';
       if (this.lblHilosAccion) this.lblHilosAccion.textContent = 'Detener análisis';
       if (this.iconAnalisis) {
@@ -512,6 +516,9 @@ export class UIManager {
       this.cardStepDestino.style.pointerEvents = 'none';
       if (this.inputNombreArchivoSalida) this.inputNombreArchivoSalida.disabled = true;
     } else {
+      if (this.telemetryManager) {
+        this.telemetryManager.detenerCronometro();
+      }
       if (this.lblTitleAccion) this.lblTitleAccion.textContent = 'Análisis';
       if (this.lblHilosAccion) this.lblHilosAccion.textContent = 'Iniciar';
       if (this.iconAnalisis) {
@@ -532,8 +539,8 @@ export class UIManager {
   /**
    * Puebla los datalists del consultor con sugerencias de autocompletado.
    */
-  poblarSugerenciasSoftware(programas, vms, versiones, propietarios, categorias = []) {
-    this.consultorController.poblarSugerencias(programas, vms, versiones, propietarios, categorias);
+  poblarSugerenciasSoftware(programas, vms, versiones, propietarios, categorias = [], asignados = [], elementos = []) {
+    this.consultorController.poblarSugerencias(programas, vms, versiones, propietarios, categorias, asignados, elementos);
   }
 
   /**
