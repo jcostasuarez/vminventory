@@ -14,11 +14,11 @@
 //! 5. Consolida la base de datos indexada en JSON para el Consultor.
 
 use crate::clasificacion::ReglasClasificacion;
-use crate::commands::resolver_ruta_qemu_nbd;
 use crate::models::{
     BdRelevamiento, ConfiguracionApp, EstadoSupervision, LogSupervision, MetadatosRelevamiento,
     ProgramaClasificado, RegistroVM, ResumenRelevamiento, VmActiva,
 };
+use crate::vmspect_backend;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -26,12 +26,14 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
-use vmspect::{InspectionEngine, Options, VmSpectError};
+use vmspect::{Options, VmSpectError};
 
 /// Capacidad máxima de la bitácora en vivo (entradas rotativas).
 const CAPACIDAD_LOGS: usize = 40;
 /// GiB exacto, coherente con `formatearBytes` del frontend (base 1024).
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+type TrabajoVm = (usize, String, PathBuf, Vec<PathBuf>);
 
 // ============================================================================
 // UTILIDADES DE TIEMPO (UTC, sin dependencias externas)
@@ -96,37 +98,6 @@ pub fn fecha_hora_iso() -> String {
         (r % 3600) / 60,
         r % 60
     )
-}
-
-// ============================================================================
-// OPCIONES DE VM SPECT
-// ============================================================================
-
-/// Traduce la configuración del frontend a las `Options` de `vmspect`,
-/// enlazando la bandera de cancelación global con el motor de inspección.
-pub fn construir_opciones(config: &ConfiguracionApp, cancelacion: &Arc<AtomicBool>) -> Options {
-    let mut opciones = Options::default();
-    opciones.include_system = config.incluir_system;
-    opciones.force_nbd = config.forzar_qemu;
-    if let Some(qemu) = config.ruta_qemu_nbd.as_deref() {
-        if !qemu.trim().is_empty() {
-            opciones.qemu_nbd = Some(PathBuf::from(qemu.trim()));
-        }
-    }
-    #[cfg(windows)]
-    if opciones.qemu_nbd.is_none() {
-        let default_win = PathBuf::from(r"C:\Program Files\qemu\qemu-nbd.exe");
-        if default_win.is_file() {
-            opciones.qemu_nbd = Some(default_win);
-        }
-    }
-    if let Some(kb) = config.tamano_chunk_kb {
-        if kb > 0 {
-            opciones.chunk_size = Some(kb.saturating_mul(1024));
-        }
-    }
-    opciones.cancel_token = Some(cancelacion.clone());
-    opciones
 }
 
 /// Clasifica y filtra los programas detectados por `vmspect`.
@@ -355,7 +326,7 @@ fn descubrir_imagenes(
         let entradas = match std::fs::read_dir(&directorio_actual) {
             Ok(e) => e,
             Err(e) => {
-                if &directorio_actual == origen {
+                if directorio_actual == origen {
                     let detalle = if e.kind() == std::io::ErrorKind::PermissionDenied
                         || e.raw_os_error() == Some(5)
                     {
@@ -426,7 +397,7 @@ fn descubrir_imagenes(
                 if exclusiones.es_archivo_excluido(file_name) {
                     continue;
                 }
-                if vmspect::is_vm_image(&path) {
+                if vmspect_backend::es_imagen_vm(&path) {
                     imagenes.push(path);
                 }
             }
@@ -554,9 +525,9 @@ pub fn ejecutar_relevamiento(
 
     // --- Fase 3: inspección concurrente ---------------------------------------
     let hilos = config.max_hilos.unwrap_or(4).clamp(1, 16);
-    let opciones = construir_opciones(config, &cancelacion);
+    let opciones = vmspect_backend::construir_opciones(config, &cancelacion);
 
-    let cola: Mutex<VecDeque<(usize, String, PathBuf, Vec<PathBuf>)>> = Mutex::new(
+    let cola: Mutex<VecDeque<TrabajoVm>> = Mutex::new(
         grupos
             .into_iter()
             .enumerate()
@@ -570,6 +541,14 @@ pub fn ejecutar_relevamiento(
             .collect(),
     );
     let informes: Mutex<Vec<(usize, RegistroVM)>> = Mutex::new(Vec::new());
+    let contexto = ContextoInspeccion {
+        supervision: &supervision,
+        app,
+        opciones: &opciones,
+        generar_discrepancias,
+        config,
+        reglas: &reglas,
+    };
 
     if total_vms > 0 {
         thread::scope(|s| {
@@ -599,18 +578,7 @@ pub fn ejecutar_relevamiento(
                         format!("Iniciando inspección de «{nombre}»..."),
                     );
 
-                    let registro = inspeccionar_vm(
-                        &supervision,
-                        app,
-                        &opciones,
-                        indice,
-                        &nombre,
-                        &carpeta,
-                        &discos,
-                        generar_discrepancias,
-                        config,
-                        &reglas,
-                    );
+                    let registro = inspeccionar_vm(&contexto, indice, &nombre, &carpeta, &discos);
 
                     supervision.remover_activa(indice);
                     supervision.procesadas.fetch_add(1, Ordering::Relaxed);
@@ -754,18 +722,28 @@ pub fn ejecutar_relevamiento(
 // INSPECCIÓN DE UNA VM (uno o varios discos en la misma carpeta)
 // ============================================================================
 
+struct ContextoInspeccion<'a> {
+    supervision: &'a Supervision,
+    app: &'a AppHandle,
+    opciones: &'a Options,
+    generar_discrepancias: bool,
+    config: &'a ConfiguracionApp,
+    reglas: &'a ReglasClasificacion,
+}
+
 fn inspeccionar_vm(
-    supervision: &Supervision,
-    app: &AppHandle,
-    opciones: &Options,
+    contexto: &ContextoInspeccion<'_>,
     indice: usize,
     nombre: &str,
     carpeta: &Path,
     discos: &[PathBuf],
-    generar_discrepancias: bool,
-    config: &ConfiguracionApp,
-    reglas: &ReglasClasificacion,
 ) -> RegistroVM {
+    let supervision = contexto.supervision;
+    let app = contexto.app;
+    let opciones = contexto.opciones;
+    let generar_discrepancias = contexto.generar_discrepancias;
+    let config = contexto.config;
+    let reglas = contexto.reglas;
     let mut observaciones: Vec<String> = Vec::new();
     let mut informe: Option<vmspect::InspectionReport> = None;
     let peso_bytes: u64 = discos
@@ -773,10 +751,13 @@ fn inspeccionar_vm(
         .filter_map(|d| std::fs::metadata(d).ok().map(|m| m.len()))
         .sum();
 
-    // Verificación preventiva de disponibilidad de qemu-nbd para evitar bloqueos por timeout
-    let nbd_disponible = resolver_ruta_qemu_nbd(opciones.qemu_nbd.as_deref()).is_ok();
+    // No intentes montar formatos NBD si el backend requerido no está disponible.
+    let nbd_disponible = vmspect_backend::resolver_qemu_nbd(opciones.qemu_nbd.as_deref()).is_ok();
     if opciones.force_nbd && !nbd_disponible {
-        observaciones.push("Backend QEMU NBD forzado pero qemu-nbd no está disponible; se omitió el montaje NBD para evitar bloqueos por timeout.".to_string());
+        observaciones.push(
+            "Backend QEMU NBD forzado pero qemu-nbd no está disponible; se omitió el montaje NBD."
+                .to_string(),
+        );
     }
 
     // Inspecciona los discos de mayor a menor hasta hallar el disco del SO.
@@ -787,7 +768,7 @@ fn inspeccionar_vm(
         if opciones.force_nbd && !nbd_disponible {
             continue 'discos;
         }
-        match vmspect::verify_image_integrity(disco) {
+        match vmspect_backend::verificar_integridad(disco) {
             Ok(true) => {}
             Ok(false) => {
                 observaciones.push(format!(
@@ -806,61 +787,19 @@ fn inspeccionar_vm(
             break 'discos;
         }
 
-        let (tx_ev, rx_ev) = std::sync::mpsc::channel();
-        let (tx_res, rx_res) = std::sync::mpsc::channel();
-        let disco_copia = disco.clone();
-        let opts = opciones.clone();
-
-        let _hilo = std::thread::Builder::new()
-            .name(format!("vmspect-vm-{indice}"))
-            .spawn(move || {
-                let engine = InspectionEngine::new(opts);
-                let res = engine.inspect_with_progress(&disco_copia, |ev| {
-                    let _ = tx_ev.send(ev);
-                });
-                let _ = tx_res.send(res);
-            });
-
-        let timeout = std::time::Duration::from_secs(60);
-        let mut ultima_actividad = Instant::now();
-        let resultado = loop {
+        let resultado = vmspect_backend::inspeccionar(disco, opciones.clone(), |ev| {
             if supervision.cancelada() {
-                break Err(VmSpectError::Cancelled);
+                return;
             }
-
-            while let Ok(ev) = rx_ev.try_recv() {
-                ultima_actividad = Instant::now();
-                supervision.actualizar_activa(
-                    indice,
-                    nombre,
-                    &ev.stage,
-                    ev.percentage,
-                    ev.detail.clone(),
-                );
-                supervision.emitir(app, "analizando_v_ms", format!("Inspeccionando «{nombre}»"));
-            }
-
-            match rx_res.try_recv() {
-                Ok(res) => break res,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    break Err(VmSpectError::Other(
-                        "El hilo de inspección se desconectó inesperadamente.".into(),
-                    ));
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    if ultima_actividad.elapsed() > timeout {
-                        observaciones.push(format!(
-                            "Timeout de I/O (60s) excedido al intentar leer particiones o registros (Windows\\System32\\config) en {}",
-                            disco.display()
-                        ));
-                        break Err(VmSpectError::Other(
-                            "Timeout de I/O al leer particiones o registros.".into(),
-                        ));
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-            }
-        };
+            supervision.actualizar_activa(
+                indice,
+                nombre,
+                &ev.stage,
+                ev.percentage,
+                ev.detail.clone(),
+            );
+            supervision.emitir(app, "analizando_v_ms", format!("Inspeccionando «{nombre}»"));
+        });
 
         match resultado {
             Ok(reporte) => {
@@ -1033,294 +972,5 @@ fn sanitizar_nombre_salida(nombre: Option<&str>) -> String {
         solo_nombre.to_string()
     } else {
         format!("{solo_nombre}.json")
-    }
-}
-
-// ============================================================================
-// TESTS UNITARIOS
-// ============================================================================
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::File;
-    use std::io::Write;
-
-    #[test]
-    fn test_sanitizar_nombre_salida() {
-        assert_eq!(sanitizar_nombre_salida(None), "Relevamiento_VMs.json");
-        assert_eq!(sanitizar_nombre_salida(Some("")), "Relevamiento_VMs.json");
-        assert_eq!(
-            sanitizar_nombre_salida(Some("mi_inventario")),
-            "mi_inventario.json"
-        );
-        assert_eq!(
-            sanitizar_nombre_salida(Some("mi_inventario.json")),
-            "mi_inventario.json"
-        );
-        assert_eq!(
-            sanitizar_nombre_salida(Some("C:\\ruta\\peligrosa\\salida")),
-            "salida.json"
-        );
-    }
-
-    #[test]
-    fn test_normalizar_nombre() {
-        assert_eq!(normalizar_nombre("Win-10_SRV 01"), "win10srv01");
-        assert_eq!(normalizar_nombre("Ubuntu-22.04"), "ubuntu2204");
-    }
-
-    #[test]
-    fn test_deducir_tipo_posesion() {
-        assert_eq!(
-            deducir_tipo_posesion(Path::new("D:\\Servidores\\VM1")),
-            Some("Servidores".to_string())
-        );
-        assert_eq!(
-            deducir_tipo_posesion(Path::new("D:\\Discos_Sueltos\\VM2")),
-            Some("Discos".to_string())
-        );
-        assert_eq!(
-            deducir_tipo_posesion(Path::new("D:\\OperadorDev\\VM3")),
-            Some("Personas".to_string())
-        );
-    }
-
-    #[test]
-    fn test_descubrir_imagenes_inexistente() {
-        let cancelacion = Arc::new(AtomicBool::new(false));
-        let mut supervision = Supervision::new(cancelacion);
-        let ruta = Path::new("ruta_que_definitivamente_no_existe_12345678");
-        let exclusiones = crate::clasificacion::ExclusionesConfig::default();
-        let resultado = descubrir_imagenes(ruta, &mut supervision, None, &exclusiones);
-        assert!(resultado.is_err());
-    }
-
-    #[test]
-    fn test_descubrir_imagenes_recursivo() {
-        let temp_dir = std::env::temp_dir().join("vminventory_test_descubrimiento");
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(temp_dir.join("sub1/sub2")).unwrap();
-
-        // Creamos archivos de prueba
-        let mut f1 = File::create(temp_dir.join("disk1.vmdk")).unwrap();
-        f1.write_all(b"# Disk DescriptorFile\nversion=1\n").unwrap();
-
-        let mut f2 = File::create(temp_dir.join("sub1/sub2/disk2.qcow2")).unwrap();
-        f2.write_all(b"QFI\xfb\0\0\0\x03").unwrap();
-
-        // Extent secundario (debe ser ignorado por vmspect::is_vm_image)
-        let mut f3 = File::create(temp_dir.join("disk1-flat.vmdk")).unwrap();
-        f3.write_all(b"fake data").unwrap();
-
-        // Archivo no VM
-        let mut f4 = File::create(temp_dir.join("readme.txt")).unwrap();
-        f4.write_all(b"texto").unwrap();
-
-        let cancelacion = Arc::new(AtomicBool::new(false));
-        let mut supervision = Supervision::new(cancelacion);
-        let exclusiones = crate::clasificacion::ExclusionesConfig::default();
-        let imagenes = descubrir_imagenes(&temp_dir, &mut supervision, None, &exclusiones).unwrap();
-
-        assert_eq!(imagenes.len(), 2);
-        assert!(imagenes.iter().any(|p| p.ends_with("disk1.vmdk")));
-        assert!(imagenes.iter().any(|p| p.ends_with("disk2.qcow2")));
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_descubrir_imagenes_con_exclusiones() {
-        let temp_dir = std::env::temp_dir().join("vminventory_test_exclusiones");
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(temp_dir.join("Validas")).unwrap();
-        std::fs::create_dir_all(temp_dir.join("$RECYCLE.BIN/Ignorada")).unwrap();
-        std::fs::create_dir_all(temp_dir.join("Temp/Ignorada")).unwrap();
-
-        // Archivos en carpeta válida
-        let mut f1 = File::create(temp_dir.join("Validas/vm1.vmdk")).unwrap();
-        f1.write_all(b"# Disk DescriptorFile\nversion=1\n").unwrap();
-
-        // Archivos en carpetas excluidas
-        let mut f2 = File::create(temp_dir.join("$RECYCLE.BIN/Ignorada/reciclada.vmdk")).unwrap();
-        f2.write_all(b"# Disk DescriptorFile\nversion=1\n").unwrap();
-
-        let mut f3 = File::create(temp_dir.join("Temp/Ignorada/temp.qcow2")).unwrap();
-        f3.write_all(b"QFI\xfb\0\0\0\x03").unwrap();
-
-        // Archivo con extensión excluida en carpeta válida
-        let mut f4 = File::create(temp_dir.join("Validas/archivo.tmp")).unwrap();
-        f4.write_all(b"tmp data").unwrap();
-
-        let exclusiones = crate::clasificacion::ExclusionesConfig {
-            folders: vec!["$RECYCLE.BIN".to_string(), "Temp".to_string()],
-            files: vec!["*.tmp".to_string()],
-        };
-
-        let cancelacion = Arc::new(AtomicBool::new(false));
-        let mut supervision = Supervision::new(cancelacion);
-        let imagenes = descubrir_imagenes(&temp_dir, &mut supervision, None, &exclusiones).unwrap();
-
-        assert_eq!(imagenes.len(), 1);
-        assert!(imagenes[0].ends_with("vm1.vmdk"));
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_formatear_duracion() {
-        assert_eq!(formatear_duracion(0), "00:00");
-        assert_eq!(formatear_duracion(59), "00:59");
-        assert_eq!(formatear_duracion(60), "01:00");
-        assert_eq!(formatear_duracion(3599), "59:59");
-        assert_eq!(formatear_duracion(3600), "1:00:00");
-        assert_eq!(formatear_duracion(3665), "1:01:05");
-        assert_eq!(formatear_duracion(86400), "24:00:00");
-    }
-
-    #[test]
-    fn test_marcas_temporales_y_fechas() {
-        let mt = marca_temporal();
-        assert_eq!(mt.len(), 8); // "HH:MM:SS"
-        assert_eq!(&mt[2..3], ":");
-        assert_eq!(&mt[5..6], ":");
-
-        let f_iso = fecha_iso();
-        assert_eq!(f_iso.len(), 10); // "YYYY-MM-DD"
-        assert_eq!(&f_iso[4..5], "-");
-        assert_eq!(&f_iso[7..8], "-");
-
-        let fh_iso = fecha_hora_iso();
-        assert_eq!(fh_iso.len(), 19); // "YYYY-MM-DDTHH:MM:SS"
-        assert_eq!(&fh_iso[10..11], "T");
-
-        let (y, m, d) = dias_a_civil(0);
-        assert_eq!((y, m, d), (1970, 1, 1));
-    }
-
-    #[test]
-    fn test_construir_opciones() {
-        let cancel = Arc::new(AtomicBool::new(false));
-        let config = ConfiguracionApp {
-            max_hilos: Some(4),
-            modo_dump: true,
-            incluir_system: true,
-            forzar_qemu: true,
-            ruta_qemu_nbd: Some("C:\\Program Files\\qemu\\qemu-nbd.exe".to_string()),
-            ruta_reglas: None,
-            tamano_chunk_kb: Some(2048),
-            generar_discrepancias: false,
-            habilitar_bitacora: false,
-            mostrar_progreso_individual: false,
-            nombre_archivo_salida: None,
-        };
-
-        let opt = construir_opciones(&config, &cancel);
-        assert!(opt.include_system);
-        assert!(opt.force_nbd);
-        assert_eq!(opt.chunk_size, Some(2048 * 1024));
-        assert_eq!(
-            opt.qemu_nbd,
-            Some(PathBuf::from("C:\\Program Files\\qemu\\qemu-nbd.exe"))
-        );
-        assert!(opt.cancel_token.is_some());
-    }
-
-    #[test]
-    fn test_clasificar_programas() {
-        let reglas = ReglasClasificacion::integradas();
-        let progs_raw = vec![
-            vmspect::Program {
-                name: "PostgreSQL 14".to_string(),
-                version: Some("14.0".to_string()),
-                publisher: Some("PostgreSQL Global Development Group".to_string()),
-                source: None,
-            },
-            vmspect::Program {
-                name: "Microsoft Visual C++ 2015-2022 Redistributable (x64)".to_string(),
-                version: Some("14.30".to_string()),
-                publisher: Some("Microsoft Corporation".to_string()),
-                source: None,
-            },
-            vmspect::Program {
-                name: "AppEmpresarialCustom".to_string(),
-                version: Some("1.0.0".to_string()),
-                publisher: None,
-                source: None,
-            },
-        ];
-
-        // En modo normal (modo_dump = false), el ruido de Visual C++ debe ser descartado
-        let clasificados = clasificar_programas(&progs_raw, &reglas, false);
-        assert_eq!(clasificados.len(), 2);
-        assert!(clasificados.iter().any(|p| p.nombre == "PostgreSQL 14"));
-        assert!(clasificados
-            .iter()
-            .any(|p| p.nombre == "AppEmpresarialCustom"));
-        assert!(!clasificados.iter().any(|p| p.nombre.contains("Visual C++")));
-
-        // En modo dump (modo_dump = true), se conservan todos
-        let clasificados_dump = clasificar_programas(&progs_raw, &reglas, true);
-        assert_eq!(clasificados_dump.len(), 3);
-    }
-
-    #[test]
-    fn test_supervision_lifecycle() {
-        let cancelacion = Arc::new(AtomicBool::new(false));
-        let sup = Supervision::new(cancelacion.clone());
-        assert_eq!(sup.cancelada(), false);
-
-        sup.registrar_log("INFO", "vm1", "Iniciando escaneo".to_string());
-        assert_eq!(sup.logs.lock().unwrap().len(), 1);
-
-        sup.actualizar_activa(
-            0,
-            "vm1",
-            "Inspeccionando partición",
-            50,
-            Some("MBR".to_string()),
-        );
-        assert_eq!(sup.activas.lock().unwrap().len(), 1);
-        assert_eq!(
-            sup.activas.lock().unwrap().get(&0).unwrap().nombre_vm,
-            "vm1"
-        );
-
-        sup.remover_activa(0);
-        assert_eq!(sup.activas.lock().unwrap().len(), 0);
-
-        sup.procesadas.store(5, Ordering::SeqCst);
-        sup.exitosas.store(4, Ordering::SeqCst);
-        sup.con_observaciones.store(1, Ordering::SeqCst);
-        let snap = sup.snapshot("analizando_v_ms", "En curso".to_string());
-        assert_eq!(snap.vms_procesadas, 5);
-        assert_eq!(snap.vms_exitosas, 4);
-        assert_eq!(snap.vms_con_observaciones, 1);
-    }
-
-    #[test]
-    fn test_detectar_nombre_interno_vmx_y_vbox() {
-        let temp_dir = std::env::temp_dir().join("vminventory_test_internos");
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        // 1. Archivo .vmx
-        let vmx_path = temp_dir.join("maquina.vmx");
-        let mut f_vmx = File::create(&vmx_path).unwrap();
-        f_vmx.write_all(b"config.version = \"8\"\ndisplayName = \"Mi Servidor Windows 2022\"\nmemsize = \"4096\"\n").unwrap();
-
-        let nombre_vmx = detectar_nombre_interno(&temp_dir);
-        assert_eq!(nombre_vmx, Some("Mi Servidor Windows 2022".to_string()));
-        let _ = std::fs::remove_file(&vmx_path);
-
-        // 2. Archivo .vbox
-        let vbox_path = temp_dir.join("maquina.vbox");
-        let mut f_vbox = File::create(&vbox_path).unwrap();
-        f_vbox.write_all(b"<?xml version=\"1.0\"?>\n<VirtualBox><Machine name=\"Ubuntu Database Srv\" uuid=\"{12345}\"></Machine></VirtualBox>").unwrap();
-
-        let nombre_vbox = detectar_nombre_interno(&temp_dir);
-        assert_eq!(nombre_vbox, Some("Ubuntu Database Srv".to_string()));
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

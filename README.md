@@ -2,7 +2,7 @@
 
 > **Auditoría, relevamiento masivo e inspección estática forense de máquinas virtuales.**
 
-[![Release](https://img.shields.io/badge/Release-v2.0.0-blue.svg)](https://github.com/tu-usuario/vminventory/releases/tag/v2.0.0)
+[![Release](https://img.shields.io/badge/Release-v2.2.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v2.2.0)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.77+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0+-646CFF.svg?logo=vite)](https://vitejs.dev/)
@@ -19,14 +19,14 @@
 ### 1. 📂 Relevador Masivo de VMs
 - **Inspección sin encendido**: Analiza discos virtuales estáticamente utilizando el motor `vmspect` con soporte nativo y backend `qemu-nbd`.
 - **Procesamiento paralelo multihilo**: Configura el número de hilos de trabajo según la CPU para acelerar escaneos en lotes de gran volumen.
-- **Tolerancia a fallos y Timeouts de I/O**: Timeouts estrictos (máx. 5 segundos) en particiones inaccesibles y colmenas de registro (`Windows\System32\config`) para evitar bloqueos.
+- **Tolerancia a fallos**: `vmspect` informa advertencias y conserva resultados parciales sin abortar todo el relevamiento.
 - **Telemetría y supervisión en tiempo real**:
   - Cronómetro autónomo de 1 segundo desacoplado de eventos del backend.
   - Barra de progreso continuo con interpolación y transiciones suaves (`transition: width 0.5s ease-in-out`).
   - Velocidad de procesamiento (VMs/min) y volumen procesado (GB).
   - Panel en vivo con estado de cada worker y flujo continuo de bitácora (*live logs*).
 - **Reportes consolidados**: Genera bases de datos estructuradas en formato JSON y reportes automáticos de discrepancias.
-- **Cancelación segura**: Control de interrupción inmediata con liberación de recursos mediante guardias RAII.
+- **Cancelación segura**: La misma bandera atómica se entrega a `vmspect` y permite detener la operación preservando lo ya procesado.
 
 ### 2. 🔎 Consultor y Analizador de Software
 - **Búsqueda multicriterio instantánea**: Filtra por nombre de programa, máquina virtual, versión, propietario, sistema operativo, tipo de posesión y categoría.
@@ -54,40 +54,31 @@
 
 ---
 
+## 🧰 Herramientas de la aplicación
+
+La interfaz expone nuevamente las tres herramientas principales:
+
+- **Analizador:** recibe un directorio de origen, busca recursivamente imágenes de máquinas virtuales con `vmspect` y genera la base de datos JSON en el destino indicado. Incluye progreso, workers, cancelación y configuración del motor.
+- **Consultor:** consulta los reportes JSON generados y permite filtrar por programa, versión, máquina virtual, tipo de posesión y asignado/elemento.
+- **Reporte:** inspecciona una única imagen de disco o reporte JSON y muestra metadatos de imagen, sistema operativo, particiones y software detectado; también permite exportar el informe.
+
+La versión se muestra en la barra de estado. El frontend la obtiene desde `CARGO_PKG_VERSION` (la versión de `src-tauri/Cargo.toml`) tanto en el comando Tauri como en el fallback de Vite, por lo que no es necesario mantener otro número de versión en la interfaz.
+
+---
+
 ## 🏗️ Arquitectura del Sistema
 
 ```mermaid
 flowchart TD
-    subgraph UI ["Frontend (Vite + Vanilla JS ES Modules)"]
-        A[index.html] --> B[main.js / Controller]
-        B --> C[state.js / Store]
-        B --> D[ui.js / Fachada de Vistas]
-        D --> D1[cards-view.js]
-        D --> D2[graph-view.js]
-        D --> D3[history-view.js]
-        D --> D4[inspector-view.js]
-        D --> D5[modals.js]
-        B --> E[telemetry.js / Live Events]
-    end
-
-    subgraph IPC ["Canal Tauri v2 IPC"]
-        E -. Telemetría y Progreso .-> RustEvents["progreso_supervision\nprogreso_inspeccion_directa"]
-        B ==>|invoke| Commands[commands.rs]
-    end
-
-    subgraph Backend ["Backend Rust (src-tauri)"]
-        Commands --> Relevamiento[relevamiento.rs\nPool multihilo con timeouts I/O]
-        Commands --> Clasificacion[clasificacion.rs\nReglas y Whitelist]
-        Commands --> AppState[models.rs\nEstado Global y RAII Guard]
-        Relevamiento --> Engine[Motor vmspect]
-        Commands --> Engine
-        Engine --> NBD[Backend qemu-nbd]
-    end
-
-    subgraph Storage ["Discos Virtuales y Salida"]
-        Engine ==>|Lectura Estática / NBD| Disks["VMDK / VDI / VHDX / QCOW2"]
-        Relevamiento ==>|Genera| Output["Reporte JSON / Discrepancias"]
-    end
+    HTML[index.html] --> Main[main.ts / bootstrap]
+    Main --> State[AppState / preferencias]
+    Main --> IPC[crearApi / frontera Tauri]
+    Main --> Flow[ConsultorFlow / filtros y consultas]
+    Flow --> UI[ui.ts / vistas y DOM]
+    Main --> Theme[theme.ts / tema visual]
+    IPC ==>|invoke| Commands[commands.rs]
+    Commands --> Backend[Motor vmspect + reglas]
+    Backend --> Output[Reportes JSON]
 ```
 
 ---
@@ -99,42 +90,44 @@ vminventory/
 ├── public/                  # Archivos estáticos (favicon, iconos)
 ├── src/                     # Código fuente del Frontend
 │   ├── assets/              # Recursos estáticos empaquetados por Vite
-│   ├── js/                  # Módulos ES organizados por responsabilidad
-│   │   ├── main.js          # Punto de entrada y orquestador de eventos
-│   │   ├── state.js         # Estado global del cliente y configuraciones
-│   │   ├── ui.js            # Fachada y control de interfaz de usuario
-│   │   ├── consultor-controller.js # Lógica de filtrado y búsqueda
-│   │   ├── cards-view.js    # Renderizado de tarjetas de resultados
-│   │   ├── graph-view.js    # Visualización gráfica de métricas
-│   │   ├── history-view.js  # Vista del historial de relevamientos
-│   │   ├── history.js       # Persistencia local del historial
-│   │   ├── inspector-view.js# Vista del inspector forense de discos
-│   │   ├── modals.js        # Modales de configuración, reglas y diagnóstico
-│   │   ├── telemetry.js     # Manejo de métricas y stream en vivo
-│   │   ├── theme.js         # Selector de tema (claro/oscuro/sistema)
-│   │   └── utils.js         # Funciones utilitarias y formateadores
-│   └── styles/              # Hojas de estilo
-│       └── app.css          # Estilos principales de la aplicación
+│   ├── js/
+│   │   ├── main.ts         # Bootstrap, estado, IPC y flujo principal
+│   │   ├── types.ts        # Contratos TypeScript para DOM, IPC y dominio
+│   │   ├── ui.ts           # Composición de vistas y referencias DOM
+│   │   └── theme.ts        # Tema claro/oscuro
+│   └── styles/
+│       └── app.css         # Estilos de la aplicación
 ├── src-tauri/               # Código fuente del Backend (Rust / Tauri v2)
 │   ├── capabilities/        # Definición de permisos y seguridad
 │   │   └── default.json     # Capacidades del core y plugins
 │   ├── icons/               # Iconos de la aplicación en múltiples resoluciones
 │   ├── src/                 # Código Rust
 │   │   ├── clasificacion.rs # Lógica de categorización de software y reglas
-│   │   ├── commands.rs      # Comandos invocables desde el Frontend (IPC)
+│   │   ├── commands.rs      # Frontera IPC y adaptación de respuestas
+│   │   ├── consultor.rs      # Consulta de reportes JSON persistidos
 │   │   ├── lib.rs           # Configuración del builder de Tauri y setup
 │   │   ├── main.rs          # Entrada binaria de la aplicación
-│   │   ├── models.rs        # Estructuras de datos, DTOs y AppState
-│   │   └── relevamiento.rs  # Orquestador del escaneo masivo multihilo
+│   │   ├── models.rs        # DTOs IPC y estado mínimo
+│   │   ├── relevamiento.rs  # Descubrimiento y escaneo masivo multihilo
+│   │   └── vmspect_backend.rs # Integración única con vmspect
 │   ├── Cargo.toml           # Dependencias y metadatos de Rust
 │   └── tauri.conf.json      # Configuración de Tauri (ventanas, CSP, bundle)
 ├── index.html               # Documento principal HTML5
 ├── package.json             # Dependencias de Node.js y scripts
-├── vite.config.js           # Configuración de Vite (puerto 5173, HMR)
+├── vite.config.ts           # Configuración de Vite (puerto 5173, HMR)
+├── tsconfig.json            # Configuración y validación de TypeScript
 ├── .gitignore               # Configuración de exclusiones de Git
 ├── RELEASE_NOTES.md         # Notas de lanzamiento y hashes SHA-256
 └── README.md                # Documentación del proyecto
 ```
+
+---
+
+## 🎯 Decisión del Frontend
+
+El frontend usa **TypeScript modular + CSS** sobre Vite. Para esta aplicación sigue siendo la opción más simple: Tauri aporta la ventana nativa y el IPC, mientras que las vistas son principalmente formularios, tablas, tarjetas y progreso.
+
+No se incorpora React, Vue ni Tailwind por ahora. TypeScript aporta tipos para el estado, el DOM y los contratos IPC sin añadir una capa de componentes innecesaria. La frontera con Tauri está centralizada en `crearApi` dentro de `src/js/main.ts`, y `npm run typecheck` valida el frontend antes del build.
 
 ---
 
@@ -160,6 +153,12 @@ vminventory/
 2. Instalar dependencias del frontend:
    ```bash
    npm install
+   ```
+
+3. Validar tipos y pruebas del frontend:
+   ```bash
+   npm run typecheck
+   npm test
    ```
 
 ---
@@ -264,7 +263,7 @@ Las reglas de patrones (`patterns`, `patrones`, `exclusions.folders`, `exclusion
 | `npm run tauri dev` | Inicia la aplicación completa en modo desarrollo (Vite + backend Rust con HMR y DevTools). |
 | `npm run dev` | Inicia únicamente el servidor de desarrollo web de Vite (`http://localhost:5173`). |
 | `npm run build` | Compila los assets del frontend en la carpeta `dist/`. |
-| `npm test` | Ejecuta la suite de pruebas unitarias y de integración frontend. |
+| `npm test` | Ejecuta las suites de contrato frontend y backend. |
 | `npm run test:rust` | Ejecuta todas las pruebas unitarias y de integración del backend Rust. |
 | `npm run tauri build` | Genera el instalador y binario de producción optimizado (`.exe` / `.msi`). |
 
@@ -284,10 +283,17 @@ Gracias a la integración con el motor `vmspect` y `qemu-nbd`:
 
 ## 📝 Changelog
 
+### [v2.2.0] - 2026-09-08 (TypeScript Frontend & Backend Contracts)
+- **Migración del frontend a TypeScript:** Se reemplaza el conjunto de módulos JavaScript por una entrada tipada y módulos de estado, UI, tema y contratos IPC.
+- **Contratos de integración verificables:** Se incorporan typecheck y pruebas de contrato para la frontera frontend/Tauri, selección de archivos, persistencia de configuración y consultas.
+- **Backend desacoplado:** La integración con `vmspect` se concentra en `vmspect_backend.rs`, se reutiliza el runtime asíncrono de Tauri y se simplifica la gestión de cancelación.
+- **Inspector y flujo de herramientas revisados:** Analizador, Consultor y Reporte comparten una API tipada; la versión mostrada se obtiene desde `CARGO_PKG_VERSION`.
+- **Pruebas backend portables:** Los contratos Rust cubren reglas, normalización del consultor, cancelación y lectura de reportes JSON sintéticos sin depender de una máquina virtual real.
+
 ### [v2.0.0] - 2026-09-07 (Engine & UI Refactor)
 - **Migración Integral a `qemu-nbd`:** Eliminación de dependencias residuales de `qemu-img`; migración completa al backend NBD de alto rendimiento en `vmspect`.
 - **Resolución y Validación Automática de Binario:** Detección predeterminada de `C:\Program Files\qemu\qemu-nbd.exe`, validación de versión con bandera `--version` y supresión de consolas emergentes en Windows.
-- **Optimización de I/O y Timeouts Estrictos:** Inclusión de límites de tiempo de 5 segundos en lecturas bloqueantes de particiones NTFS/FAT y colmenas de registro `Windows\System32\config`.
+- **Integración centralizada del motor:** La inspección y la cancelación se delegan al motor `vmspect`, sin hilos ni polling duplicados en la capa Tauri.
 - **Cronómetro Autónomo (1s):** Temporizador desacoplado de la telemetría del backend con actualización continua cada 1000 ms y resincronización de drift.
 - **Barra de Progreso Continuo:** Transiciones visuales suaves con CSS (`transition: width 0.5s ease-in-out`) para eliminar saltos bruscos.
 

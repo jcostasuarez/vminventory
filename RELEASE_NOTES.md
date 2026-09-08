@@ -1,88 +1,67 @@
-# VM Inventory v2.1.0 - Módulo Consultor, Inspección y UX
+# VM Inventory v2.2.0 - Frontend TypeScript y contratos backend
 
-## 🚀 Resumen del Lanzamiento
+## 🚀 Resumen del lanzamiento
 
-Esta versión menor (`v2.1.0`) introduce el nuevo módulo **Consultor** en el backend, mejoras sustanciales de filtrado y visualización en el panel de consulta, nuevas insignias de versión/editor en el inspector, y un rediseño de filtros más simple y potente.
+La versión menor `v2.2.0` incorpora una frontera frontend/backend tipada, reorganiza la integración con `vmspect` y añade contratos automatizados para validar la aplicación sin depender de una máquina virtual real. El alcance no introduce una ruptura confirmada en la interfaz de usuario pública; los comandos Tauri internos se mantienen centralizados en la API del frontend.
 
-### 🌟 Principales Mejoras y Novedades
+### 🌟 Principales mejoras y novedades
 
-#### 1. Backend: Nuevo Módulo `consultor`
-- **Extracción del motor de consultas:** Se separa la lógica de sugerencias y consulta de software en un módulo Rust dedicado (`consultor.rs`), desacoplado de los comandos Tauri. Refactor interno sin cambios en la interfaz de comandos.
-- **Sugerencias aisladas por aplicación y versión:** El motor ahora aísla las sugerencias por app/versión, evitando mezclar candidatos de distintas versiones.
-- **Cobertura de pruebas:** Tests end-to-end del ciclo completo de consulta de software y de aislamiento de sugerencias por versión.
+#### 1. Frontend TypeScript
+- **Migración modular:** El frontend pasa de módulos JavaScript aislados a `main.ts`, `ui.ts`, `theme.ts` y `types.ts`.
+- **Contratos IPC tipados:** La API de invocación Tauri centraliza relevamiento, consulta, inspección, diagnóstico, validación de QEMU y controles de ventana.
+- **Configuración robusta:** Se normalizan límites de workers, rutas, nombre de salida y preferencias persistidas del Analizador y Consultor.
+- **Versión consistente:** La interfaz usa la versión declarada en `src-tauri/Cargo.toml`, con fallback de Vite y confirmación desde `CARGO_PKG_VERSION`.
 
-#### 2. Consultor: Filtrado y Búsqueda Mejorados
-- **Búsqueda por editor:** El filtro de programa/aplicación ahora también coincide contra el editor del software.
-- **Normalización de guiones bajos y espacios:** La búsqueda es tolerante a `_` y espacios (`SQL_Server` ⇄ `SQL Server`).
-- **Deducción de entidad desde el reporte:** Cuando una VM no tiene propietario/elemento asignado, se infiere la entidad (Persona, Disco o Servidor) a partir del nombre del archivo JSON del reporte.
-- **Alias de sistema operativo:** El filtro reconoce `windows`/`win` y `linux`/`lin`.
-- **Filtros consolidados:** El panel de filtros ahora usa un selector único **Tipo / Ubicación** (Personas, Discos, Servidores) junto a **Asignado / Elemento**, simplificando la experiencia de consulta.
+#### 2. Backend y motor `vmspect`
+- **Integración desacoplada:** La construcción de opciones, resolución de `qemu-nbd` e inspección se concentran en `src-tauri/src/vmspect_backend.rs`.
+- **Runtime Tauri:** Las tareas bloqueantes usan `tauri::async_runtime::spawn_blocking`, evitando una dependencia de runtime duplicada.
+- **Cancelación compartida:** La bandera atómica se entrega al motor para detener relevamientos e inspecciones de forma consistente.
+- **Cierre seguro:** El comando de cierre utiliza la ventana Tauri en lugar de terminar el proceso directamente.
 
-#### 3. Grafo de Dependencias
-- **Agrupación por programa y versión:** Cada versión de una aplicación tiene su propia tarjeta en el diagrama, mostrando la versión y el total de VM(s) asociadas.
+#### 3. Herramientas y experiencia de usuario
+- **Analizador, Consultor y Reporte:** Las tres herramientas comparten una API y estado tipados, con selección de carpetas/archivos y control de operaciones concurrentes.
+- **Inspector simplificado:** Se conserva la presentación de metadatos, particiones, software y progreso directo en una interfaz más compacta.
+- **Estilos consolidados:** La aplicación utiliza la hoja principal `src/styles/app.css`.
 
-#### 4. Inspector y Design System
-- **Insignias de versión y editor:** Se muestran de forma destacada en la tabla del inspector.
-- **Nuevo design system:** Se incorpora la hoja de estilos `shadcn.css` para una apariencia más moderna y consistente.
+#### 4. Verificación automatizada
+- **Frontend:** `npm run typecheck` y 7 pruebas de contrato con `tsx`.
+- **Backend:** 4 pruebas de contrato Rust para reglas, filtros, cancelación y lectura de reportes JSON sintéticos.
+- **Producción:** Build Vite y empaquetado Tauri Windows x64 verificados antes del release.
 
----
+## 📦 Artefactos de descarga
 
-## 📦 Enlaces de Descarga de Artefactos
+| Plataforma | Artefacto | Tamaño aproximado | Descripción |
+| :--- | :--- | ---: | :--- |
+| **Windows x64** | `VM Inventory_2.2.0_x64-setup.exe` | 2.8 MiB | Instalador NSIS estándar para Windows 10/11 |
+| **Windows x64** | `VM Inventory_2.2.0_x64_en-US.msi` | 4.1 MiB | Paquete MSI para despliegue empresarial |
+| **Código fuente** | `v2.2.0.tar.gz` / `v2.2.0.zip` | — | Generados automáticamente por GitHub al publicar el tag |
 
-| Plataforma | Artefacto | Descripción |
-| :--- | :--- | :--- |
-| **Windows x64** | `VM.Inventory_2.1.0_x64-setup.exe` | Instalador ejecutable estándar para Windows 10/11 |
-| **Windows x64** | `VM.Inventory_2.1.0_x64_en-US.msi` | Paquete de instalación MSI empresarial |
-| **Código Fuente** | `v2.1.0.tar.gz` / `v2.1.0.zip` | Código fuente del release |
+## 🔒 Integridad SHA-256
 
----
+Hashes calculados sobre los instaladores generados por `npm run tauri build`:
 
-## 🔒 Verificación de Integridad (SHA-256 Checksums)
+| Artefacto | SHA-256 |
+| :--- | :--- |
+| `VM Inventory_2.2.0_x64-setup.exe` | `75fa071cade563d9c9375ab78e06548b17b7a84b5a6c7f6754406c7fa967b8fb` |
+| `VM Inventory_2.2.0_x64_en-US.msi` | `bbde1a72537823d90e62135d4877aaaad69ace552754e81aef98d8163119e441` |
 
-Para verificar la autenticidad y verificar que el archivo descargado no ha sido alterado, ejecuta el siguiente comando en **PowerShell**:
+Para verificar un archivo descargado desde PowerShell:
 
-### Comando de verificación rápida:
 ```powershell
-Get-FileHash -Path ".\VM.Inventory_2.1.0_x64-setup.exe" -Algorithm SHA256 | Format-List
+Get-FileHash -Path ".\VM Inventory_2.2.0_x64-setup.exe" -Algorithm SHA256
+Get-FileHash -Path ".\VM Inventory_2.2.0_x64_en-US.msi" -Algorithm SHA256
 ```
 
-### Script de validación automatizada contra lista de hashes:
-```powershell
-$ExpectedHashes = @{
-    "VM.Inventory_2.1.0_x64-setup.exe" = "95c159c7344a1ec5299f25a6b4d5c719ccff07412917ab4a25ccb3980a7b8220"
-    "VM.Inventory_2.1.0_x64_en-US.msi" = "d8c214228e8a66d4c50c90d119a904625bed55e12fc0830f496c098656ca3382"
-}
-
-foreach ($File in $ExpectedHashes.Keys) {
-    if (Test-Path $File) {
-        $Actual = (Get-FileHash -Path $File -Algorithm SHA256).Hash.ToLower()
-        $Expected = $ExpectedHashes[$File].ToLower()
-        if ($Actual -eq $Expected) {
-            Write-Host "[OK] $File coincide con el checksum SHA-256." -ForegroundColor Green
-        } else {
-            Write-Host "[ERROR] $File NO coincide con el checksum esperado!" -ForegroundColor Red
-        }
-    } else {
-        Write-Host "[SKIP] $File no encontrado en el directorio actual." -ForegroundColor Yellow
-    }
-}
-```
-
----
-
-## 📋 Instrucciones de Empaquetado y Distribución
-
-Para compilar y empaquetar los instaladores de distribución autónomos:
+## 📋 Construcción reproducible
 
 ```bash
-# 1. Asegurar dependencias de Node.js y compilar frontend
 npm install
-npm run build
-
-# 2. Generar instaladores MSI y EXE de producción con Tauri v2
+npm run typecheck
+npm test
 npm run tauri build
 ```
 
-Los instaladores resultantes se ubicarán en:
-- `src-tauri/target/release/bundle/nsis/VM Inventory_2.1.0_x64-setup.exe`
-- `src-tauri/target/release/bundle/msi/VM Inventory_2.1.0_x64_en-US.msi`
+Los instaladores se generan en:
+
+- `src-tauri/target/release/bundle/nsis/VM Inventory_2.2.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/VM Inventory_2.2.0_x64_en-US.msi`

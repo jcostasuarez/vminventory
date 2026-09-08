@@ -1,14 +1,17 @@
 {
   "name": "vminventory",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/**/*.test.js",
-    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "tsx --test tests/frontend.contract.test.ts",
+    "test:backend": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "test:rust": "npm run test:backend",
+    "typecheck": "tsc --noEmit",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -17,6 +20,8 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
     "vite": "^5.0.0"
   }
 }

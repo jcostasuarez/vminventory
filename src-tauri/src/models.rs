@@ -3,112 +3,39 @@
 //! y el frontend web, además del estado global de la aplicación.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-
-/// Identificador de la tarea de relevamiento masivo en el estado global.
-pub const TAREA_RELEVAMIENTO: &str = "relevamiento_masivo";
-/// Identificador de la tarea de inspección directa en el estado global.
-pub const TAREA_INSPECCION_DIRECTA: &str = "inspeccion_directa";
+use std::sync::Arc;
 
 // ============================================================================
 // ESTADO GLOBAL DE LA APLICACIÓN
 // ============================================================================
 
-/// Estado global gestionado por Tauri (`Builder::manage`).
+/// Estado mínimo gestionado por Tauri.
 ///
-/// * `cancel_requested` / `cancelacion`: bandera atómica compartida con `vmspect`,
-///   que se consulta de forma frecuente en cada etapa para abortar oportunamente.
-/// * `running_task`: identificador de la tarea en ejecución activa (`None` si está inactiva).
-/// * `tareas`: registro de tareas activas (id -> descripción).
+/// El motor `vmspect` recibe esta misma bandera en sus opciones y la consulta
+/// durante la inspección. La app admite una operación activa a la vez.
 pub struct AppState {
     pub cancel_requested: Arc<AtomicBool>,
-    #[allow(dead_code)]
-    pub cancelacion: Arc<AtomicBool>,
-    pub running_task: Arc<Mutex<Option<String>>>,
-    pub tareas: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
-        let cancel = Arc::new(AtomicBool::new(false));
         Self {
-            cancel_requested: cancel.clone(),
-            cancelacion: cancel,
-            running_task: Arc::new(Mutex::new(None)),
-            tareas: Arc::new(Mutex::new(HashMap::new())),
+            cancel_requested: Arc::new(AtomicBool::new(false)),
         }
     }
 }
 
 impl AppState {
-    /// Prepara una nueva tarea: limpia la bandera de cancelación y registra
-    /// el identificador en `running_task` y `tareas`.
-    pub fn preparar_tarea(&self, id: &str, descripcion: &str) {
+    /// Limpia la cancelación antes de iniciar una nueva operación.
+    pub fn preparar_tarea(&self) {
         self.cancel_requested.store(false, Ordering::SeqCst);
-        if let Ok(mut running) = self.running_task.lock() {
-            *running = Some(id.to_string());
-        }
-        if let Ok(mut tareas) = self.tareas.lock() {
-            tareas.insert(id.to_string(), descripcion.to_string());
-        }
     }
 
-    /// Finaliza una tarea liberando `running_task` y retirándola de `tareas`.
-    pub fn finalizar_tarea(&self, id: &str) {
-        if let Ok(mut running) = self.running_task.lock() {
-            if running.as_deref() == Some(id) {
-                *running = None;
-            }
-        }
-        if let Ok(mut tareas) = self.tareas.lock() {
-            tareas.remove(id);
-        }
-    }
-
-    /// Solicita la cancelación inmediata de las tareas en curso.
+    /// Solicita la cancelación de la operación activa.
     pub fn solicitar_cancelacion(&self) {
         self.cancel_requested.store(true, Ordering::SeqCst);
-    }
-
-    /// Indica si se ha solicitado la cancelación.
-    #[inline]
-    #[allow(dead_code)]
-    pub fn esta_cancelada(&self) -> bool {
-        self.cancel_requested.load(Ordering::Relaxed)
-    }
-
-    /// Devuelve el identificador de la tarea activa, si existe.
-    #[allow(dead_code)]
-    pub fn tarea_en_curso(&self) -> Option<String> {
-        self.running_task.lock().ok().and_then(|g| g.clone())
-    }
-
-    /// Número de tareas registradas actualmente en ejecución.
-    #[allow(dead_code)]
-    pub fn tareas_activas(&self) -> usize {
-        self.tareas.lock().map(|t| t.len()).unwrap_or(0)
-    }
-}
-
-/// Guardia RAII que asegura la liberación incondicional del estado de una tarea
-/// al salir del ámbito, sea por éxito, error, cancelación o pánico.
-pub struct TaskGuard<'a> {
-    state: &'a AppState,
-    task_id: &'static str,
-}
-
-impl<'a> TaskGuard<'a> {
-    pub fn new(state: &'a AppState, task_id: &'static str, descripcion: &str) -> Self {
-        state.preparar_tarea(task_id, descripcion);
-        Self { state, task_id }
-    }
-}
-
-impl<'a> Drop for TaskGuard<'a> {
-    fn drop(&mut self) {
-        self.state.finalizar_tarea(self.task_id);
     }
 }
 
@@ -194,10 +121,6 @@ pub struct EstadoSupervision {
     pub peso_total_procesado_gb: f64,
 }
 
-/// Alias canónico de telemetría de relevamiento.
-#[allow(dead_code)]
-pub type EventoProgresoRelevamiento = EstadoSupervision;
-
 /// Progreso de la inspección directa (evento `progreso_inspeccion_directa`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProgresoInspeccion {
@@ -207,7 +130,7 @@ pub struct ProgresoInspeccion {
 }
 
 // ============================================================================
-// INFORME DIRECTO (respuesta de `inspeccionar_disco_individual`)
+// INFORME DIRECTO (respuesta de `inspeccionar_disco_vm`)
 // ============================================================================
 
 /// Resumen de la imagen de disco inspeccionada.
@@ -387,10 +310,6 @@ pub struct ResumenRelevamiento {
     pub cancelado: bool,
 }
 
-/// Alias canónico del resultado del proceso de relevamiento.
-#[allow(dead_code)]
-pub type ResumenProceso = ResumenRelevamiento;
-
 // ============================================================================
 // CONSULTOR DE SOFTWARE (respuesta de `consultar_software_en_jsons`)
 // ============================================================================
@@ -463,213 +382,4 @@ pub struct ResultadoValidacionQemu {
     pub version_info: Option<String>,
     pub ruta_resuelta: Option<String>,
     pub error: Option<String>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_app_state_lifecycle() {
-        let state = AppState::default();
-        assert!(!state.esta_cancelada());
-        assert_eq!(state.tarea_en_curso(), None);
-        assert_eq!(state.tareas_activas(), 0);
-
-        state.preparar_tarea(TAREA_RELEVAMIENTO, "Relevamiento de prueba");
-        assert_eq!(state.tarea_en_curso(), Some(TAREA_RELEVAMIENTO.to_string()));
-        assert_eq!(state.tareas_activas(), 1);
-        assert!(!state.esta_cancelada());
-
-        state.solicitar_cancelacion();
-        assert!(state.esta_cancelada());
-
-        state.finalizar_tarea(TAREA_RELEVAMIENTO);
-        assert_eq!(state.tarea_en_curso(), None);
-        assert_eq!(state.tareas_activas(), 0);
-    }
-
-    #[test]
-    fn test_task_guard_raii() {
-        let state = AppState::default();
-        {
-            let _guard = TaskGuard::new(&state, TAREA_INSPECCION_DIRECTA, "Inspección de disco");
-            assert_eq!(
-                state.tarea_en_curso(),
-                Some(TAREA_INSPECCION_DIRECTA.to_string())
-            );
-            assert_eq!(state.tareas_activas(), 1);
-        }
-        // Al salir del ámbito, TaskGuard debe liberar la tarea
-        assert_eq!(state.tarea_en_curso(), None);
-        assert_eq!(state.tareas_activas(), 0);
-    }
-
-    #[test]
-    fn test_configuracion_app_serde() {
-        let json_data = r#"{
-            "max_hilos": 8,
-            "modo_dump": true,
-            "incluir_system": true,
-            "forzar_qemu": false,
-            "ruta_qemu_nbd": "/usr/bin/qemu-nbd",
-            "ruta_reglas": null,
-            "tamano_chunk_kb": 1024,
-            "generar_discrepancias": true,
-            "habilitar_bitacora": true,
-            "mostrar_progreso_individual": true,
-            "nombre_archivo_salida": "salida.json"
-        }"#;
-
-        let config: ConfiguracionApp =
-            serde_json::from_str(json_data).expect("Debe deserializar ConfiguracionApp");
-        assert_eq!(config.max_hilos, Some(8));
-        assert!(config.modo_dump);
-        assert!(config.incluir_system);
-        assert!(!config.forzar_qemu);
-        assert_eq!(config.ruta_qemu_nbd.as_deref(), Some("/usr/bin/qemu-nbd"));
-        assert_eq!(config.ruta_reglas, None);
-        assert_eq!(config.tamano_chunk_kb, Some(1024));
-        assert!(config.generar_discrepancias);
-        assert!(config.habilitar_bitacora);
-        assert_eq!(config.nombre_archivo_salida.as_deref(), Some("salida.json"));
-
-        let serialized = serde_json::to_string(&config).expect("Debe serializar ConfiguracionApp");
-        assert!(serialized.contains("\"max_hilos\":8"));
-    }
-
-    #[test]
-    fn test_bd_relevamiento_serde() {
-        let bd = BdRelevamiento {
-            metadatos: MetadatosRelevamiento {
-                aplicacion: "VM Inventory".to_string(),
-                fecha_relevamiento: "2026-09-07".to_string(),
-                ruta_origen: "D:\\VMs".to_string(),
-                duracion_formateada: "00:05:30".to_string(),
-                total_vms: 1,
-                vms_exitosas: 1,
-                vms_con_observaciones: 0,
-                vms_discrepantes: 0,
-                vms_fallidas: 0,
-                total_programas: 2,
-                peso_total_gb: 25.5,
-                cancelado: false,
-            },
-            vms: vec![RegistroVM {
-                exitosa: true,
-                nombre_vm: "Windows 10 Dev".to_string(),
-                nombre_interno: Some("Win10-Dev".to_string()),
-                ruta_carpeta: "D:\\VMs\\Win10".to_string(),
-                propietario: Some("Operador".to_string()),
-                tipo_posesion: Some("Personas".to_string()),
-                elemento_asignado: Some("Operador".to_string()),
-                origen_categoria: Some("Personas".to_string()),
-                asignado: Some("Operador".to_string()),
-                elemento: None,
-                sistema_operativo: "Windows 10 Pro".to_string(),
-                hipervisor: Some("VMware".to_string()),
-                peso_gb: 25.5,
-                discrepante: false,
-                observaciones: vec![],
-                fecha_relevamiento: "2026-09-07".to_string(),
-                programas: vec![ProgramaClasificado {
-                    nombre: "PostgreSQL 15".to_string(),
-                    version: Some("15.3".to_string()),
-                    editor: Some("PostgreSQL".to_string()),
-                    categoria: Some("Bases de datos".to_string()),
-                    tags: vec!["db".to_string()],
-                    relevante: true,
-                }],
-                peso_bytes: 27380416512,
-            }],
-        };
-
-        let json = serde_json::to_string_pretty(&bd).expect("Debe serializar BdRelevamiento");
-        let deserialized: BdRelevamiento =
-            serde_json::from_str(&json).expect("Debe deserializar BdRelevamiento");
-
-        assert_eq!(deserialized.metadatos.total_vms, 1);
-        assert_eq!(deserialized.vms.len(), 1);
-        assert_eq!(deserialized.vms[0].nombre_vm, "Windows 10 Dev");
-        assert_eq!(deserialized.vms[0].programas.len(), 1);
-        assert_eq!(deserialized.vms[0].programas[0].nombre, "PostgreSQL 15");
-        assert_eq!(
-            deserialized.vms[0].programas[0].categoria.as_deref(),
-            Some("Bases de datos")
-        );
-    }
-
-    #[test]
-    fn test_informe_directo_serde() {
-        let informe = InformeDirecto {
-            exito: true,
-            archivo: "test.vmdk".to_string(),
-            imagen: ResumenImagen {
-                formato: "VMDK".to_string(),
-                hipervisor: "VMware".to_string(),
-                tamano_virtual: 53687091200,
-                tamano_real: 21474836480,
-            },
-            estadisticas: ResumenEstadisticas {
-                modo_acceso: "Nativo".to_string(),
-                duracion_ms: 120,
-                bytes_leidos: 5242880,
-                invocaciones_qemu: 0,
-            },
-            vm_info: ResumenVmInfo {
-                os_nombre: "Ubuntu 22.04".to_string(),
-                os_edition_version: "22.04.3 LTS".to_string(),
-                os_build: "5.15.0".to_string(),
-                os_service_pack: String::new(),
-                vmtools_version: Some("12.1.0".to_string()),
-                hostname: Some("ubuntu-srv".to_string()),
-                arquitectura: Some("x86_64".to_string()),
-            },
-            sistema_operativo: "Ubuntu 22.04".to_string(),
-            esquema: "GPT".to_string(),
-            particiones: vec![ResumenParticion {
-                indice: 1,
-                inicio: 1048576,
-                tamano: 53686042624,
-                tipo: "Linux filesystem".to_string(),
-                etiqueta: Some("root".to_string()),
-                sistema_archivos: "ext4".to_string(),
-            }],
-            programas: vec![],
-            advertencias: vec![],
-        };
-
-        let json = serde_json::to_string(&informe).expect("Debe serializar InformeDirecto");
-        let res: InformeDirecto =
-            serde_json::from_str(&json).expect("Debe deserializar InformeDirecto");
-        assert_eq!(res.imagen.formato, "VMDK");
-        assert_eq!(res.particiones.len(), 1);
-        assert_eq!(res.particiones[0].sistema_archivos, "ext4");
-    }
-
-    #[test]
-    fn test_diagnostico_y_validacion_qemu_serde() {
-        let diag = DiagnosticoSistema {
-            equipo_ejecucion: "TEST-PC".to_string(),
-            sistema_operativo: "windows".to_string(),
-            arquitectura: "x86_64".to_string(),
-            hilos_cpu: 16,
-            hilos_recomendados: 8,
-            qemu_nbd_disponible: true,
-        };
-        let diag_json = serde_json::to_string(&diag).unwrap();
-        let diag_res: DiagnosticoSistema = serde_json::from_str(&diag_json).unwrap();
-        assert_eq!(diag_res.hilos_cpu, 16);
-
-        let qemu_val = ResultadoValidacionQemu {
-            es_valido: true,
-            version_info: Some("qemu-nbd 8.2.0".to_string()),
-            ruta_resuelta: Some("C:\\Program Files\\qemu\\qemu-nbd.exe".to_string()),
-            error: None,
-        };
-        let qemu_json = serde_json::to_string(&qemu_val).unwrap();
-        let qemu_res: ResultadoValidacionQemu = serde_json::from_str(&qemu_json).unwrap();
-        assert!(qemu_res.es_valido);
-        assert_eq!(qemu_res.version_info.as_deref(), Some("qemu-nbd 8.2.0"));
-    }
 }

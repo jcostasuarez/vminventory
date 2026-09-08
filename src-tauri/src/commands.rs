@@ -8,13 +8,14 @@ use crate::models::{
     AppState, BdRelevamiento, ConfiguracionApp, DiagnosticoSistema, InformeDirecto,
     ProgresoInspeccion, RegistroVM, ResultadoClasificacion, ResultadoConsultaSoftware,
     ResultadoValidacionQemu, ResumenEstadisticas, ResumenImagen, ResumenParticion,
-    ResumenRelevamiento, ResumenVmInfo, TaskGuard, TAREA_INSPECCION_DIRECTA, TAREA_RELEVAMIENTO,
+    ResumenRelevamiento, ResumenVmInfo,
 };
-use crate::relevamiento::{clasificar_programas, construir_opciones, ejecutar_relevamiento};
+use crate::relevamiento::{clasificar_programas, ejecutar_relevamiento};
+use crate::vmspect_backend::{construir_opciones, inspeccionar, resolver_qemu_nbd};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 // ============================================================================
 // RELEVAMIENTO MASIVO
@@ -33,19 +34,14 @@ pub async fn procesar_relevamiento(
     generar_discrepancias: Option<bool>,
     configuracion: Option<ConfiguracionApp>,
 ) -> Result<ResumenRelevamiento, String> {
+    state.preparar_tarea();
     let cancelacion = state.cancel_requested.clone();
     let mut config = configuracion.unwrap_or_default();
     config.generar_discrepancias = generar_discrepancias.unwrap_or(config.generar_discrepancias);
     let origen = ruta_origen.clone();
     let destino = ruta_destino.clone();
 
-    tokio::task::spawn_blocking(move || {
-        let gestion = app.state::<AppState>();
-        let _guardia = TaskGuard::new(
-            &gestion,
-            TAREA_RELEVAMIENTO,
-            &format!("{origen} → {destino}"),
-        );
+    tauri::async_runtime::spawn_blocking(move || {
         ejecutar_relevamiento(
             &app,
             cancelacion,
@@ -59,15 +55,7 @@ pub async fn procesar_relevamiento(
     .map_err(|e| format!("Error interno del runtime de tareas: {e}"))?
 }
 
-/// Solicita la cancelación del relevamiento masivo en curso.
-#[tauri::command]
-pub fn cancelar_relevamiento(state: State<AppState>) -> Result<(), String> {
-    state.solicitar_cancelacion();
-    Ok(())
-}
-
-/// Alias canónico de `cancelar_relevamiento`: detiene cualquier inspección o
-/// relevamiento activo conmutando la bandera de cancelación del `AppState`.
+/// Detiene la operación de inspección o relevamiento activa.
 #[tauri::command]
 pub fn detener_inspeccion(state: State<AppState>) -> Result<(), String> {
     state.solicitar_cancelacion();
@@ -81,35 +69,23 @@ pub fn detener_inspeccion(state: State<AppState>) -> Result<(), String> {
 /// Inspección estática de una única imagen de disco con eventos de progreso
 /// `progreso_inspeccion_directa`; devuelve el informe directo completo.
 #[tauri::command]
-pub async fn inspeccionar_disco_individual(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    ruta_disco: String,
-    configuracion: Option<ConfiguracionApp>,
-) -> Result<InformeDirecto, String> {
-    let cancelacion = state.cancel_requested.clone();
-    let config = configuracion.unwrap_or_default();
-    let ruta = ruta_disco.clone();
-    let app_handle = app.clone();
-
-    tokio::task::spawn_blocking(move || {
-        let gestion = app_handle.state::<AppState>();
-        let _guardia = TaskGuard::new(&gestion, TAREA_INSPECCION_DIRECTA, &ruta);
-        inspeccionar_disco(&app_handle, &cancelacion, &ruta, &config)
-    })
-    .await
-    .map_err(|e| format!("Error interno del runtime de tareas: {e}"))?
-}
-
-/// Alias canónico de `inspeccionar_disco_individual` (nombre del diseño original).
-#[tauri::command]
 pub async fn inspeccionar_disco_vm(
     app: AppHandle,
     state: State<'_, AppState>,
     ruta_disco: String,
     configuracion: Option<ConfiguracionApp>,
 ) -> Result<InformeDirecto, String> {
-    inspeccionar_disco_individual(app, state, ruta_disco, configuracion).await
+    state.preparar_tarea();
+    let cancelacion = state.cancel_requested.clone();
+    let config = configuracion.unwrap_or_default();
+    let ruta = ruta_disco.clone();
+    let app_handle = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        inspeccionar_disco(&app_handle, &cancelacion, &ruta, &config)
+    })
+    .await
+    .map_err(|e| format!("Error interno del runtime de tareas: {e}"))?
 }
 
 /// Núcleo de la inspección directa: valida la ruta, ejecuta `vmspect` con
@@ -159,7 +135,7 @@ fn inspeccionar_disco(
     let reglas = ReglasClasificacion::cargar(config.ruta_reglas.as_deref());
     let opciones = construir_opciones(config, cancelacion);
 
-    if config.forzar_qemu && resolver_ruta_qemu_nbd(opciones.qemu_nbd.as_deref()).is_err() {
+    if config.forzar_qemu && resolver_qemu_nbd(opciones.qemu_nbd.as_deref()).is_err() {
         return Err("El backend QEMU NBD está forzado en la configuración pero el ejecutable qemu-nbd no se encuentra disponible en el sistema.".to_string());
     }
 
@@ -172,60 +148,18 @@ fn inspeccionar_disco(
         },
     );
 
-    let (tx_ev, rx_ev) = std::sync::mpsc::channel();
-    let (tx_res, rx_res) = std::sync::mpsc::channel();
-    let ruta_copia = ruta_img.clone();
-    let cancelacion_worker = cancelacion.clone();
-
-    let _hilo = std::thread::Builder::new()
-        .name("vmspect-inspect-direct".to_string())
-        .spawn(move || {
-            let engine = vmspect::InspectionEngine::new(opciones);
-            let res = engine.inspect_with_progress(&ruta_copia, |ev| {
-                if !cancelacion_worker.load(std::sync::atomic::Ordering::Relaxed) {
-                    let _ = tx_ev.send(ev);
-                }
-            });
-            let _ = tx_res.send(res);
-        });
-
-    let timeout = std::time::Duration::from_secs(60);
-    let mut ultima_actividad = std::time::Instant::now();
-    let resultado = loop {
-        if cancelacion.load(std::sync::atomic::Ordering::Relaxed) {
-            break Err(vmspect::VmSpectError::Cancelled);
-        }
-
-        while let Ok(ev) = rx_ev.try_recv() {
-            ultima_actividad = std::time::Instant::now();
+    let resultado = inspeccionar(&ruta_img, opciones, |ev| {
+        if !cancelacion.load(std::sync::atomic::Ordering::Relaxed) {
             let _ = app.emit(
                 "progreso_inspeccion_directa",
                 ProgresoInspeccion {
                     porcentaje: ev.percentage,
-                    etapa: ev.stage.clone(),
-                    detalle: ev.detail.clone(),
+                    etapa: ev.stage,
+                    detalle: ev.detail,
                 },
             );
         }
-
-        match rx_res.try_recv() {
-            Ok(res) => break res,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                break Err(vmspect::VmSpectError::Other(
-                    "El hilo de inspección se cerró inesperadamente.".into(),
-                ));
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
-                if ultima_actividad.elapsed() > timeout {
-                    break Err(vmspect::VmSpectError::Other(
-                        "Timeout de I/O (60s) al intentar leer particiones o colmenas del registro (Windows\\System32\\config)."
-                            .into(),
-                    ));
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-        }
-    };
+    });
 
     match resultado {
         Ok(reporte) => {
@@ -387,58 +321,6 @@ pub async fn consultar_software_en_jsons(
 // VALIDACIÓN DE HERRAMIENTAS Y REGLAS
 // ============================================================================
 
-/// Resuelve la ruta del ejecutable `qemu-nbd`, priorizando la ruta explícita,
-/// la ruta predeterminada de Windows (`C:\Program Files\qemu\qemu-nbd.exe`),
-/// la variable de entorno `QEMU_NBD` y la búsqueda en el `PATH` del sistema.
-pub fn resolver_ruta_qemu_nbd(explicita: Option<&Path>) -> Result<PathBuf, String> {
-    if let Some(p) = explicita {
-        if p.is_file() {
-            return Ok(p.to_path_buf());
-        }
-        return Err(format!(
-            "No existe el archivo especificado: {}",
-            p.display()
-        ));
-    }
-
-    #[cfg(windows)]
-    {
-        let default_win = PathBuf::from(r"C:\Program Files\qemu\qemu-nbd.exe");
-        if default_win.is_file() {
-            return Ok(default_win);
-        }
-        let default_x86 = PathBuf::from(r"C:\Program Files (x86)\qemu\qemu-nbd.exe");
-        if default_x86.is_file() {
-            return Ok(default_x86);
-        }
-    }
-
-    if let Ok(env_path) = std::env::var("QEMU_NBD") {
-        let p = PathBuf::from(env_path);
-        if p.is_file() {
-            return Ok(p);
-        }
-    }
-
-    match vmspect::vms::nbd::resolve_qemu_nbd(None) {
-        Ok(p) => Ok(p),
-        Err(e) => {
-            #[cfg(windows)]
-            {
-                Err(format!(
-                    "No se halló qemu-nbd en 'C:\\Program Files\\qemu\\qemu-nbd.exe' ni en el PATH: {e}"
-                ))
-            }
-            #[cfg(not(windows))]
-            {
-                Err(format!(
-                    "No se halló qemu-nbd en PATH ni rutas estándar: {e}"
-                ))
-            }
-        }
-    }
-}
-
 /// Verifica la existencia y ejecutabilidad del binario `qemu-nbd` requerido
 /// por `vmspect` (resolución automática: PATH, `QEMU_NBD`, rutas estándar).
 #[tauri::command]
@@ -450,15 +332,13 @@ pub async fn validar_binario_qemu(ruta: Option<String>) -> Result<ResultadoValid
             .filter(|r| !r.is_empty())
             .map(Path::new);
 
-        let resuelta = match resolver_ruta_qemu_nbd(explicita) {
+        let resuelta = match resolver_qemu_nbd(explicita) {
             Ok(p) => p,
             Err(e) => {
                 return ResultadoValidacionQemu {
                     es_valido: false,
                     version_info: None,
-                    ruta_resuelta: explicita
-                        .map(|p| p.display().to_string())
-                        .or_else(|| Some(r"C:\Program Files\qemu\qemu-nbd.exe".to_string())),
+                    ruta_resuelta: explicita.map(|p| p.display().to_string()),
                     error: Some(e),
                 };
             }
@@ -552,8 +432,14 @@ pub fn probar_clasificacion_software(
 }
 
 // ============================================================================
-// DIAGNÓSTICO DEL SISTEMA
+// VERSIÓN Y DIAGNÓSTICO DEL SISTEMA
 // ============================================================================
+
+/// Fuente única de versión para el frontend: la versión declarada en Cargo.toml.
+#[tauri::command]
+pub fn obtener_version_app() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
 
 /// Diagnóstico del equipo anfitrión: CPU, SO, arquitectura y disponibilidad de QEMU.
 #[tauri::command]
@@ -574,7 +460,7 @@ pub fn obtener_diagnostico() -> Result<DiagnosticoSistema, String> {
         arquitectura: std::env::consts::ARCH.to_string(),
         hilos_cpu,
         hilos_recomendados: (hilos_cpu / 2).clamp(1, 8),
-        qemu_nbd_disponible: resolver_ruta_qemu_nbd(None).is_ok(),
+        qemu_nbd_disponible: resolver_qemu_nbd(None).is_ok(),
     })
 }
 
@@ -653,6 +539,6 @@ pub fn ventana_maximizar_restaurar(window: tauri::Window) -> Result<(), String> 
 
 /// Cierra la aplicación.
 #[tauri::command]
-pub fn ventana_cerrar() -> Result<(), String> {
-    std::process::exit(0);
+pub fn ventana_cerrar(window: tauri::Window) -> Result<(), String> {
+    window.close().map_err(|e| e.to_string())
 }

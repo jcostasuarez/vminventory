@@ -258,6 +258,10 @@ body {
   animation: fadeIn 0.15s ease-out;
 }
 
+.tool-view-panel:not(.active) {
+  display: none;
+}
+
 @keyframes fadeIn {
   from { opacity: 0.8; transform: translateY(2px); }
   to { opacity: 1; transform: translateY(0); }
@@ -283,12 +287,6 @@ body {
   align-items: center;
 }
 
-.brand-custom-img {
-  max-height: 48px;
-  max-width: 180px;
-  object-fit: contain;
-  display: block;
-}
 
 .brand-logo-symbol {
   width: 48px;
@@ -806,195 +804,6 @@ body {
   font-size: 13px;
 }
 
-/* ==========================================================================
-   CENTRO VISUAL DE PROCESAMIENTO (Pipeline de Inspección HUD)
-   ========================================================================== */
-.telemetry-visual-hud {
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 14px 18px;
-  gap: 12px;
-}
-
-[data-theme="dark"] .telemetry-visual-hud {
-  background: #0f172a;
-  border-color: #334155;
-}
-
-.hud-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.hud-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-}
-
-.hud-header-title-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.activity-live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #38bdf8;
-  box-shadow: 0 0 8px #38bdf8;
-  animation: pulse-dot 1.8s infinite ease-in-out;
-  flex-shrink: 0;
-}
-
-@keyframes pulse-dot {
-  0%, 100% { transform: scale(1); opacity: 0.8; }
-  50% { transform: scale(1.35); opacity: 1; }
-}
-
-.hud-tag {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-secondary);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.hud-header-badges {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.hud-canvas-workers-badge {
-  font-size: 11px;
-  font-weight: 700;
-  color: #38bdf8;
-  background: rgba(56, 189, 248, 0.12);
-  border: 1px solid rgba(56, 189, 248, 0.3);
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-family: "Cascadia Code", Consolas, monospace;
-}
-
-/* Pipeline Stages */
-.hud-pipeline-stages {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-.hud-stage-step {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background: var(--bg-app);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 8px 12px;
-  min-width: 0;
-  transition: all 0.2s ease;
-}
-
-.hud-stage-step.active {
-  border-color: var(--primary);
-  background: var(--bg-card-ready);
-  box-shadow: 0 0 0 1px var(--primary), 0 2px 8px var(--glow);
-}
-
-.hud-stage-step.completed {
-  border-color: var(--success);
-  background: var(--bg-surface);
-}
-
-.hud-stage-badge {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  background: var(--border);
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 800;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-}
-
-.hud-stage-step.active .hud-stage-badge {
-  background: var(--primary);
-  color: #ffffff;
-}
-
-.hud-stage-step.completed .hud-stage-badge {
-  background: var(--success);
-  color: #ffffff;
-}
-
-.hud-stage-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.hud-stage-name {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.hud-stage-status {
-  font-size: 11px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.hud-stage-connector {
-  width: 12px;
-  height: 2px;
-  background: var(--border);
-  flex-shrink: 0;
-  border-radius: 1px;
-}
-
-/* Canvas de Ondas de Inspección */
-.hud-canvas-wrapper {
-  position: relative;
-  width: 100%;
-  height: 54px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #080f1d;
-  border: 1px solid var(--border);
-  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
-}
-
-#canvasTelemetryVisual {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.metric-inline-item strong {
-  color: var(--text-primary);
-  font-weight: 800;
-}
-
 .metric-badge-ok {
   color: var(--success);
   font-weight: 700;
@@ -1510,7 +1319,7 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  display: flex;
+  display: none;
   flex-direction: column;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
 }
@@ -1659,6 +1468,7 @@ body {
   color: var(--text-primary);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
   pointer-events: none;
+  display: none;
   transform: translate(-50%, -100%);
   margin-top: -12px;
   min-width: 180px;
@@ -1711,6 +1521,7 @@ body {
   width: 380px;
   max-width: calc(100% - 24px);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  display: none;
   animation: drawerSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   backdrop-filter: blur(8px);
 }
@@ -2230,7 +2041,7 @@ body {
 }
 
 /* ==========================================================================
-   BADGES DE CATEGORÍA Y ETIQUETAS DE SOFTWARE (vminspect-rs)
+   BADGES DE CATEGORÍA Y ETIQUETAS DE SOFTWARE (vmspect)
    ========================================================================== */
 .consultor-category-badge {
   display: inline-flex;
@@ -2275,7 +2086,7 @@ body {
   color: var(--text-secondary);
 }
 
-/* ==========================================================================
+/* ============================================================================
    VISTA: INSPECTOR DE MÁQUINAS VIRTUALES (INSPECTOR DE VM)
    ========================================================================== */
 .inspector-progress-box {
@@ -2283,17 +2094,21 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px 18px;
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 8px;
   margin-bottom: 14px;
 }
 
 .inspector-results-wrapper {
-  display: flex;
+  display: none;
   flex-direction: column;
   gap: 16px;
   padding-bottom: 24px;
+}
+
+#inspectorWarningsBox {
+  display: none;
 }
 
 .inspector-grid-two-col {
@@ -2470,5 +2285,128 @@ body {
 }
 
 .inspector-table tr:hover td {
-  background: var(--surface-hover);
+  background: var(--bg-surface-hover);
+}
+
+.validation-ok {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.validation-error,
+.text-warn {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.text-success {
+  color: var(--success);
+}
+
+.simulation-status {
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.simulation-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.simulation-line,
+.simulation-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.empty-state-title {
+  font-weight: 600;
+}
+
+.empty-state-detail {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.consultor-metric-detail {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* Herramientas restauradas: selección y resumen del Analizador/Reporte */
+.report-selection-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.report-selection-row .step-card {
+  min-height: 82px;
+}
+
+.report-selection-row .step-card:first-child {
+  cursor: default;
+}
+
+.report-selection-row .step-card:first-child:hover {
+  transform: none;
+}
+
+.analyzer-summary {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--primary);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.reporte-warning-title {
+  color: var(--warning);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.reporte-warning-item {
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.report-table-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted) !important;
+}
+
+.text-muted {
+  color: var(--text-muted);
+}
+
+.mono {
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.statusbar-version {
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 4px;
+}
+
+@media (max-width: 760px) {
+  .report-selection-row {
+    grid-template-columns: 1fr;
+  }
 }
