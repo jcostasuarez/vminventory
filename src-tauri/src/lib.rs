@@ -11,7 +11,7 @@ mod vmspect_backend;
 use commands::{
     abrir_carpeta, consultar_software_en_jsons, detener_inspeccion, exportar_informe_individual,
     inspeccionar_disco_vm, obtener_diagnostico, obtener_informacion_reglas, obtener_version_app,
-    probar_clasificacion_software, procesar_relevamiento, validar_binario_qemu, ventana_cerrar,
+    probar_clasificacion_software, procesar_relevamiento, ventana_cerrar,
     ventana_maximizar_restaurar, ventana_minimizar,
 };
 use models::AppState;
@@ -36,10 +36,9 @@ pub fn run() {
             // Consultor de software
             consultar_software_en_jsons,
             exportar_informe_individual,
-            // Versión, diagnóstico y validación de herramientas
+            // Versión y diagnóstico del sistema
             obtener_version_app,
             obtener_diagnostico,
-            validar_binario_qemu,
             // Reglas de clasificación
             obtener_informacion_reglas,
             probar_clasificacion_software,

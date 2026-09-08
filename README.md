@@ -2,7 +2,7 @@
 
 > **Auditoría, relevamiento masivo e inspección estática forense de máquinas virtuales.**
 
-[![Release](https://img.shields.io/badge/Release-v2.3.1-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v2.3.1)
+[![Release](https://img.shields.io/badge/Release-v3.0.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v3.0.0)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.77+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0+-646CFF.svg?logo=vite)](https://vitejs.dev/)
@@ -138,8 +138,8 @@ No se incorpora React, Vue ni Tailwind por ahora. TypeScript aporta tipos para e
 - **Node.js**: `>= 18.0.0`
 - **Rust Toolchain**: `>= 1.77.2` ([rustup.rs](https://rustup.rs/))
 - **C++ Build Tools** (en Windows: Visual Studio C++ Build Tools) o dependencias nativas de Linux (`libwebkit2gtk-4.1`, `build-essential`, `curl`, `wget`, `file`, `libssl-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`).
-- **QEMU NBD (`qemu-nbd`)**: Requerido para soporte completo de discos virtuales complejos.
-  - **Windows**: Ubicación estándar en `C:\Program Files\qemu\qemu-nbd.exe` (detectada automáticamente) o mediante la variable de entorno `QEMU_NBD`.
+- **QEMU NBD (`qemu-nbd`)**: Requerido para soporte completo de discos virtuales complejos. La aplicación no ejecuta ni valida este binario: `vmspect` se encarga de resolverlo y lanzarlo únicamente cuando la inspección lo necesita.
+  - **Windows**: Instalable desde QEMU; `vmspect` busca la ubicación estándar, `QEMU_NBD` o el PATH.
   - **Linux / macOS**: Instalable mediante el gestor de paquetes (`apt install qemu-utils` o `brew install qemu`).
 
 ### Instalación
@@ -283,6 +283,12 @@ Gracias a la integración con el motor `vmspect` y `qemu-nbd`:
 
 ## 📝 Changelog
 
+### [v3.0.0] - 2026-09-08 (Delegación completa de qemu-nbd)
+- **Cambio rompedor:** se eliminan el comando Tauri `validar_binario_qemu`, el método frontend `validarQemu` y los controles de validación manual de `qemu-nbd`.
+- **Responsabilidad centralizada:** `vmspect` resuelve, valida y ejecuta `qemu-nbd` durante la inspección; VM Inventory solo transmite la configuración explícita y el indicador de backend.
+- **Diagnóstico simplificado:** el diagnóstico de la aplicación ya no afirma disponibilidad de `qemu-nbd` fuera de una inspección real.
+- **Verificación:** TypeScript, contratos frontend/backend, formato Rust y build Vite verificados antes del empaquetado.
+
 ### [v2.3.1] - 2026-09-08 (Actualización de vmspect)
 - **Dependencia actualizada:** Se fija el motor `vmspect` en `v0.4.2` para incorporar la versión solicitada sin cambios en el contrato de VM Inventory.
 - **Mantenimiento de release:** Se sincronizan las versiones de Cargo, Tauri y npm para el parche `v2.3.1`.
@@ -303,7 +309,7 @@ Gracias a la integración con el motor `vmspect` y `qemu-nbd`:
 
 ### [v2.0.0] - 2026-09-07 (Engine & UI Refactor)
 - **Migración Integral a `qemu-nbd`:** Eliminación de dependencias residuales de `qemu-img`; migración completa al backend NBD de alto rendimiento en `vmspect`.
-- **Resolución y Validación Automática de Binario:** Detección predeterminada de `C:\Program Files\qemu\qemu-nbd.exe`, validación de versión con bandera `--version` y supresión de consolas emergentes en Windows.
+- **Delegación completa del backend NBD:** La resolución, validación operativa y ejecución de `qemu-nbd` quedan en `vmspect`; la capa Tauri solo traduce opciones y consume el informe.
 - **Integración centralizada del motor:** La inspección y la cancelación se delegan al motor `vmspect`, sin hilos ni polling duplicados en la capa Tauri.
 - **Cronómetro Autónomo (1s):** Temporizador desacoplado de la telemetría del backend con actualización continua cada 1000 ms y resincronización de drift.
 - **Barra de Progreso Continuo:** Transiciones visuales suaves con CSS (`transition: width 0.5s ease-in-out`) para eliminar saltos bruscos.

@@ -96,12 +96,10 @@ describe('Contratos agnósticos del frontend', () => {
 
     await api.obtenerVersion();
     await api.consultarSoftware(payload);
-    await api.validarQemu(null);
 
     assert.deepEqual(calls, [
       { command: 'obtener_version_app' },
-      { command: 'consultar_software_en_jsons', args: payload },
-      { command: 'validar_binario_qemu', args: { ruta: null } }
+      { command: 'consultar_software_en_jsons', args: payload }
     ]);
   });
 

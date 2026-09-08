@@ -22,7 +22,6 @@ import type {
   RelevamientoPayload,
   ResumenRelevamiento,
   ResultadoConsultaSoftware,
-  ResultadoValidacionQemu,
   SearchFilters,
   StorageLike,
   Theme,
@@ -246,10 +245,6 @@ export function crearApi(invoke: InvokeFunction = tauriInvoke as InvokeFunction)
     exportarInforme: (rutaDestino: string, informe: InformeDirecto) =>
       invoke<string>('exportar_informe_individual', { rutaDestino, informe }),
     obtenerDiagnostico: () => invoke<DiagnosticoSistema>('obtener_diagnostico'),
-    validarQemu: (ruta: string | null) => invoke<ResultadoValidacionQemu>(
-      'validar_binario_qemu',
-      { ruta }
-    ),
     consultarSoftware: (payload: ConsultarSoftwarePayload) => invoke<ResultadoConsultaSoftware>(
       'consultar_software_en_jsons',
       payload
@@ -750,7 +745,7 @@ function bindShell(
 
   ui.btnExaminarQemu?.addEventListener('click', async () => {
     try {
-      const path = await seleccionarArchivo(open, 'Seleccionar ejecutable qemu-nbd');
+      const path = await seleccionarArchivo(open, 'Seleccionar ruta de qemu-nbd para vmspect');
       if (path && ui.cfgRutaQemu) ui.cfgRutaQemu.value = path;
     } catch (error) {
       if (typeof alert === 'function') alert(`No se pudo seleccionar qemu-nbd: ${error}`);
@@ -768,19 +763,6 @@ function bindShell(
     }
   });
 
-  ui.btnValidarQemu?.addEventListener('click', async () => {
-    if (ui.lblEstadoValidacionQemu) ui.lblEstadoValidacionQemu.textContent = 'Validando qemu-nbd...';
-    try {
-      const result = await apiClient.validarQemu(ui.cfgRutaQemu?.value.trim() || null);
-      if (ui.lblEstadoValidacionQemu) {
-        ui.lblEstadoValidacionQemu.textContent = result.es_valido
-          ? `✓ ${result.version_info || 'Ejecutable funcional'} (${result.ruta_resuelta || 'PATH'})`
-          : `✗ ${result.error || 'qemu-nbd no disponible'}`;
-      }
-    } catch (error) {
-      if (ui.lblEstadoValidacionQemu) ui.lblEstadoValidacionQemu.textContent = `Error: ${error}`;
-    }
-  });
 
   ui.btnGuardarConfigAnalizador?.addEventListener('click', () => {
     const config = state.guardarAnalizador(ui.leerFormularioConfiguracionAnalizador());

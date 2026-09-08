@@ -286,15 +286,6 @@ export interface DiagnosticoSistema {
   arquitectura: string;
   hilos_cpu: number;
   hilos_recomendados: number;
-  qemu_nbd_disponible?: boolean;
-  qemu_img_disponible?: boolean;
-}
-
-export interface ResultadoValidacionQemu {
-  es_valido: boolean;
-  version_info?: string | null;
-  ruta_resuelta?: string | null;
-  error?: string | null;
 }
 
 export interface InvokeFunction {
@@ -339,7 +330,6 @@ export interface AppApi extends ConsultorApi {
   ): Promise<InformeDirecto>;
   exportarInforme(rutaDestino: string, informe: InformeDirecto): Promise<string>;
   obtenerDiagnostico(): Promise<DiagnosticoSistema>;
-  validarQemu(ruta: string | null): Promise<ResultadoValidacionQemu>;
 }
 
 export interface ConsultorFlowUi {

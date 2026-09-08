@@ -189,8 +189,6 @@ export class UIManager {
   public cfgForzarQemu: DomElementLike | null = null;
   public cfgRutaQemu: DomElementLike | null = null;
   public btnExaminarQemu: DomElementLike | null = null;
-  public btnValidarQemu: DomElementLike | null = null;
-  public lblEstadoValidacionQemu: DomElementLike | null = null;
   public cfgRutaReglas: DomElementLike | null = null;
   public btnExaminarReglas: DomElementLike | null = null;
   public cfgTamanoChunk: DomElementLike | null = null;
@@ -353,8 +351,6 @@ export class UIManager {
     this.cfgForzarQemu = get('cfgForzarQemu');
     this.cfgRutaQemu = get('cfgRutaQemu');
     this.btnExaminarQemu = get('btnExaminarQemu');
-    this.btnValidarQemu = get('btnValidarQemu');
-    this.lblEstadoValidacionQemu = get('lblEstadoValidacionQemu');
     this.cfgRutaReglas = get('cfgRutaReglas');
     this.btnExaminarReglas = get('btnExaminarReglas');
     this.cfgTamanoChunk = get('cfgTamanoChunk');
@@ -771,8 +767,7 @@ export class UIManager {
 
   actualizarDiagnostico(diagnostico: DiagnosticoSistema): void {
     if (!this.sysDiagnosticText) return;
-    const qemu = diagnostico.qemu_nbd_disponible ?? diagnostico.qemu_img_disponible;
-    this.sysDiagnosticText.textContent = `${diagnostico.equipo_ejecucion} • ${diagnostico.sistema_operativo} (${diagnostico.arquitectura}) • ${diagnostico.hilos_cpu} CPUs • qemu-nbd: ${qemu ? 'OK' : 'No detectado'}`;
+    this.sysDiagnosticText.textContent = `${diagnostico.equipo_ejecucion} • ${diagnostico.sistema_operativo} (${diagnostico.arquitectura}) • ${diagnostico.hilos_cpu} CPUs`;
   }
 
   actualizarTelemetria(estado: EstadoSupervision): void {

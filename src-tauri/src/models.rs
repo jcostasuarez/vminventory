@@ -360,7 +360,7 @@ pub struct ResultadoConsultaSoftware {
 }
 
 // ============================================================================
-// DIAGNÓSTICO Y VALIDACIÓN DE HERRAMIENTAS
+// DIAGNÓSTICO DEL SISTEMA
 // ============================================================================
 
 /// Diagnóstico del equipo anfitrión (respuesta de `obtener_diagnostico`).
@@ -371,15 +371,4 @@ pub struct DiagnosticoSistema {
     pub arquitectura: String,
     pub hilos_cpu: usize,
     pub hilos_recomendados: usize,
-    #[serde(default, alias = "qemu_img_disponible")]
-    pub qemu_nbd_disponible: bool,
-}
-
-/// Resultado de la validación del binario QEMU (`validar_binario_qemu`).
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct ResultadoValidacionQemu {
-    pub es_valido: bool,
-    pub version_info: Option<String>,
-    pub ruta_resuelta: Option<String>,
-    pub error: Option<String>,
 }

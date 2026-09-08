@@ -7,11 +7,10 @@ use crate::clasificacion::ReglasClasificacion;
 use crate::models::{
     AppState, BdRelevamiento, ConfiguracionApp, DiagnosticoSistema, InformeDirecto,
     ProgresoInspeccion, RegistroVM, ResultadoClasificacion, ResultadoConsultaSoftware,
-    ResultadoValidacionQemu, ResumenEstadisticas, ResumenImagen, ResumenParticion,
-    ResumenRelevamiento, ResumenVmInfo,
+    ResumenEstadisticas, ResumenImagen, ResumenParticion, ResumenRelevamiento, ResumenVmInfo,
 };
 use crate::relevamiento::{clasificar_programas, ejecutar_relevamiento};
-use crate::vmspect_backend::{construir_opciones, inspeccionar, resolver_qemu_nbd};
+use crate::vmspect_backend::{construir_opciones, inspeccionar};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -133,11 +132,8 @@ fn inspeccionar_disco(
     }
 
     let reglas = ReglasClasificacion::cargar(config.ruta_reglas.as_deref());
+    // La resolución y ejecución de qemu-nbd pertenecen exclusivamente a vmspect.
     let opciones = construir_opciones(config, cancelacion);
-
-    if config.forzar_qemu && resolver_qemu_nbd(opciones.qemu_nbd.as_deref()).is_err() {
-        return Err("El backend QEMU NBD está forzado en la configuración pero el ejecutable qemu-nbd no se encuentra disponible en el sistema.".to_string());
-    }
 
     let _ = app.emit(
         "progreso_inspeccion_directa",
@@ -318,83 +314,8 @@ pub async fn consultar_software_en_jsons(
 }
 
 // ============================================================================
-// VALIDACIÓN DE HERRAMIENTAS Y REGLAS
+// REGLAS DE CLASIFICACIÓN
 // ============================================================================
-
-/// Verifica la existencia y ejecutabilidad del binario `qemu-nbd` requerido
-/// por `vmspect` (resolución automática: PATH, `QEMU_NBD`, rutas estándar).
-#[tauri::command]
-pub async fn validar_binario_qemu(ruta: Option<String>) -> Result<ResultadoValidacionQemu, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let explicita = ruta
-            .as_deref()
-            .map(str::trim)
-            .filter(|r| !r.is_empty())
-            .map(Path::new);
-
-        let resuelta = match resolver_qemu_nbd(explicita) {
-            Ok(p) => p,
-            Err(e) => {
-                return ResultadoValidacionQemu {
-                    es_valido: false,
-                    version_info: None,
-                    ruta_resuelta: explicita.map(|p| p.display().to_string()),
-                    error: Some(e),
-                };
-            }
-        };
-
-        match ejecutar_version_qemu(&resuelta) {
-            Ok(version) => ResultadoValidacionQemu {
-                es_valido: true,
-                version_info: Some(version),
-                ruta_resuelta: Some(resuelta.display().to_string()),
-                error: None,
-            },
-            Err(e) => ResultadoValidacionQemu {
-                es_valido: false,
-                version_info: None,
-                ruta_resuelta: Some(resuelta.display().to_string()),
-                error: Some(e),
-            },
-        }
-    })
-    .await
-    .map_err(|e| format!("Error interno del runtime de tareas: {e}"))
-}
-
-/// Ejecuta `qemu-nbd --version` y devuelve la primera línea de salida.
-fn ejecutar_version_qemu(ruta: &Path) -> Result<String, String> {
-    let mut cmd = std::process::Command::new(ruta);
-    cmd.arg("--version");
-    // Evita el parpadeo de ventana de consola en Windows.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x0800_0000);
-    }
-    let salida = cmd
-        .output()
-        .map_err(|e| format!("No se pudo ejecutar {}: {e}", ruta.display()))?;
-    if !salida.status.success() {
-        return Err(format!(
-            "El binario existió pero respondió con código de error: {}",
-            salida.status
-        ));
-    }
-    let texto = String::from_utf8_lossy(&salida.stdout);
-    let primera = texto.lines().next().unwrap_or("").trim();
-    if primera.is_empty() {
-        let texto_err = String::from_utf8_lossy(&salida.stderr);
-        let primera_err = texto_err.lines().next().unwrap_or("").trim();
-        if !primera_err.is_empty() {
-            return Ok(primera_err.to_string());
-        }
-        return Err("El binario no reportó información de versión.".to_string());
-    }
-    Ok(primera.to_string())
-}
-
 /// Devuelve los metadatos del conjunto de reglas activo para el simulador.
 #[tauri::command]
 pub fn obtener_informacion_reglas(
@@ -441,7 +362,7 @@ pub fn obtener_version_app() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// Diagnóstico del equipo anfitrión: CPU, SO, arquitectura y disponibilidad de QEMU.
+/// Diagnóstico del equipo anfitrión: CPU, SO y arquitectura.
 #[tauri::command]
 pub fn obtener_diagnostico() -> Result<DiagnosticoSistema, String> {
     let hilos_cpu = std::thread::available_parallelism()
@@ -460,7 +381,6 @@ pub fn obtener_diagnostico() -> Result<DiagnosticoSistema, String> {
         arquitectura: std::env::consts::ARCH.to_string(),
         hilos_cpu,
         hilos_recomendados: (hilos_cpu / 2).clamp(1, 8),
-        qemu_nbd_disponible: resolver_qemu_nbd(None).is_ok(),
     })
 }
 

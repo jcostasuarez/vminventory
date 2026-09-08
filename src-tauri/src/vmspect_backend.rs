@@ -1,8 +1,8 @@
 //! Integración única con el motor `vmspect`.
 //!
 //! Este módulo no conoce Tauri ni la interfaz gráfica. Traduce la configuración
-//! de la aplicación al motor, resuelve `qemu-nbd` y expone la inspección para
-//! el inspector individual y el relevamiento masivo.
+//! de la aplicación al motor y expone la inspección para el inspector individual
+//! y el relevamiento masivo.
 
 use crate::models::ConfiguracionApp;
 use std::path::{Path, PathBuf};
@@ -21,14 +21,6 @@ pub fn construir_opciones(config: &ConfiguracionApp, cancelacion: &Arc<AtomicBoo
     if let Some(qemu) = config.ruta_qemu_nbd.as_deref() {
         if !qemu.trim().is_empty() {
             opciones.qemu_nbd = Some(PathBuf::from(qemu.trim()));
-        }
-    }
-
-    #[cfg(windows)]
-    if opciones.qemu_nbd.is_none() {
-        let ruta_predeterminada = PathBuf::from(r"C:\Program Files\qemu\qemu-nbd.exe");
-        if ruta_predeterminada.is_file() {
-            opciones.qemu_nbd = Some(ruta_predeterminada);
         }
     }
 
@@ -57,53 +49,42 @@ where
     InspectionEngine::new(opciones).inspect_with_progress(ruta, progreso)
 }
 
-/// Resuelve el ejecutable `qemu-nbd` priorizando una ruta explícita, la variable
-/// `QEMU_NBD` y la resolución nativa del motor.
-pub fn resolver_qemu_nbd(explicita: Option<&Path>) -> Result<PathBuf, String> {
-    if let Some(ruta) = explicita {
-        if ruta.is_file() {
-            return Ok(ruta.to_path_buf());
-        }
-        return Err(format!(
-            "No existe el archivo especificado: {}",
-            ruta.display()
-        ));
+#[cfg(test)]
+mod tests {
+    use super::construir_opciones;
+    use crate::models::ConfiguracionApp;
+    use std::path::Path;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    #[test]
+    fn deja_la_resolucion_y_ejecucion_de_qemu_en_vmspect() {
+        let config = ConfiguracionApp {
+            forzar_qemu: true,
+            ruta_qemu_nbd: None,
+            ..Default::default()
+        };
+        let cancelacion = Arc::new(AtomicBool::new(false));
+
+        let opciones = construir_opciones(&config, &cancelacion);
+
+        assert!(opciones.force_nbd);
+        assert!(opciones.qemu_nbd.is_none());
     }
 
-    #[cfg(windows)]
-    {
-        for ruta in [
-            PathBuf::from(r"C:\Program Files\qemu\qemu-nbd.exe"),
-            PathBuf::from(r"C:\Program Files (x86)\qemu\qemu-nbd.exe"),
-        ] {
-            if ruta.is_file() {
-                return Ok(ruta);
-            }
-        }
-    }
+    #[test]
+    fn solo_transmite_a_vmspect_la_ruta_explicita_configurada() {
+        let config = ConfiguracionApp {
+            ruta_qemu_nbd: Some("ruta/que/vmspect/debe/resolver".to_string()),
+            ..Default::default()
+        };
+        let cancelacion = Arc::new(AtomicBool::new(false));
 
-    if let Ok(valor) = std::env::var("QEMU_NBD") {
-        let ruta = PathBuf::from(valor);
-        if ruta.is_file() {
-            return Ok(ruta);
-        }
-    }
+        let opciones = construir_opciones(&config, &cancelacion);
 
-    match vmspect::vms::nbd::resolve_qemu_nbd(None) {
-        Ok(ruta) => Ok(ruta),
-        Err(error) => {
-            #[cfg(windows)]
-            {
-                Err(format!(
-                    "No se halló qemu-nbd en rutas estándar ni en el PATH: {error}"
-                ))
-            }
-            #[cfg(not(windows))]
-            {
-                Err(format!(
-                    "No se halló qemu-nbd en PATH ni rutas estándar: {error}"
-                ))
-            }
-        }
+        assert_eq!(
+            opciones.qemu_nbd.as_deref(),
+            Some(Path::new("ruta/que/vmspect/debe/resolver"))
+        );
     }
 }
