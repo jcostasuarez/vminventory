@@ -1,3 +1,51 @@
+# VM Inventory v2.3.1 - Actualización de vmspect
+
+## 🚀 Resumen del lanzamiento
+
+La versión de mantenimiento `v2.3.1` fija el motor estático `vmspect` en `v0.4.2`, sincroniza el versionado de Cargo, Tauri y npm, y conserva sin cambios el contrato funcional de VM Inventory.
+
+### 🔧 Cambios
+
+- **Motor actualizado:** `vmspect` pasa de `v0.4.1` a `v0.4.2` en la aplicación y el lockfile de Cargo.
+- **Versionado sincronizado:** la aplicación se publica como `v2.3.1` en Cargo, Tauri, npm, README y los artefactos Windows.
+- **Compatibilidad:** no se introducen cambios rompientes ni nuevas interfaces públicas.
+
+## 📦 Artefactos de descarga
+
+| Plataforma | Artefacto | Tamaño | Descripción |
+| :--- | :--- | ---: | :--- |
+| **Windows x64** | `VM Inventory_2.3.1_x64-setup.exe` | 2,846,223 bytes | Instalador NSIS estándar para Windows 10/11 |
+| **Windows x64** | `VM Inventory_2.3.1_x64_en-US.msi` | 4,251,648 bytes | Paquete MSI para despliegue empresarial |
+| **Código fuente** | `v2.3.1.tar.gz` / `v2.3.1.zip` | — | Generados automáticamente por GitHub al publicar el tag |
+
+## 🔒 Integridad SHA-256
+
+| Artefacto | SHA-256 |
+| :--- | :--- |
+| `VM Inventory_2.3.1_x64-setup.exe` | `da4e693ed047e7ea9c616fbf23d122fd8fece23e1feca1bdc8ab1021089369a9` |
+| `VM Inventory_2.3.1_x64_en-US.msi` | `6e28848551222ef78bfe3e73675d2ef1ae3c8754f79bfc186aeb19a40359bc1a` |
+
+Para verificar un archivo descargado desde PowerShell:
+
+```powershell
+Get-FileHash -Path ".\VM Inventory_2.3.1_x64-setup.exe" -Algorithm SHA256
+Get-FileHash -Path ".\VM Inventory_2.3.1_x64_en-US.msi" -Algorithm SHA256
+```
+
+## ✅ Verificación del release
+
+- `npm run typecheck`
+- `npm test`: 7 contratos frontend y 4 contratos backend aprobados.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- `npm run tauri build`: bundles NSIS y MSI Windows x64 generados correctamente con `vmspect v0.4.2`.
+
+Los instaladores se generan en:
+
+- `src-tauri/target/release/bundle/nsis/VM Inventory_2.3.1_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/VM Inventory_2.3.1_x64_en-US.msi`
+
+---
+
 # VM Inventory v2.3.0 - Descubrimiento y concurrencia con vmspect
 
 ## 🚀 Resumen del lanzamiento

@@ -2,11 +2,11 @@
 
 > **Auditoría, relevamiento masivo e inspección estática forense de máquinas virtuales.**
 
-[![Release](https://img.shields.io/badge/Release-v2.3.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v2.3.0)
+[![Release](https://img.shields.io/badge/Release-v2.3.1-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v2.3.1)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.77+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0+-646CFF.svg?logo=vite)](https://vitejs.dev/)
-[![Engine](https://img.shields.io/badge/Engine-vmspect_v0.4-emerald.svg)](https://crates.io/crates/vmspect)
+[![Engine](https://img.shields.io/badge/Engine-vmspect_v0.4.2-emerald.svg)](https://crates.io/crates/vmspect)
 [![Backend](https://img.shields.io/badge/NBD-qemu--nbd-purple.svg)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#)
 
@@ -282,6 +282,10 @@ Gracias a la integración con el motor `vmspect` y `qemu-nbd`:
 ---
 
 ## 📝 Changelog
+
+### [v2.3.1] - 2026-09-08 (Actualización de vmspect)
+- **Dependencia actualizada:** Se fija el motor `vmspect` en `v0.4.2` para incorporar la versión solicitada sin cambios en el contrato de VM Inventory.
+- **Mantenimiento de release:** Se sincronizan las versiones de Cargo, Tauri y npm para el parche `v2.3.1`.
 
 ### [v2.3.0] - 2026-09-08 (Descubrimiento y concurrencia con vmspect)
 - **Descubrimiento delegado a `vmspect`:** Se utiliza `vmspect::list_vms` para recorrer recursivamente las imágenes y filtrar extents secundarios sin mantener un segundo walker en la aplicación.
