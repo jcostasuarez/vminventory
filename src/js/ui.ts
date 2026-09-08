@@ -449,7 +449,8 @@ export class UIManager {
     this.habilitarBitacora = Boolean(config.habilitar_bitacora);
     this.mostrarProgresoIndividual = Boolean(config.mostrar_progreso_individual);
     if (this.wrapperBitacora) {
-      this.wrapperBitacora.style.display = this.habilitarBitacora ? 'flex' : 'none';
+      this.wrapperBitacora.style.display = this.habilitarBitacora ? 'block' : 'none';
+      if (!this.habilitarBitacora) this.wrapperBitacora.removeAttribute('open');
     }
     if (this.wrapperVmIndividual) {
       this.wrapperVmIndividual.style.display = this.mostrarProgresoIndividual ? 'flex' : 'none';
@@ -790,6 +791,7 @@ export class UIManager {
     if (this.lblProgresoMsg) this.lblProgresoMsg.textContent = estado.mensaje_estado || '';
     if (this.barGlobal) {
       this.barGlobal.style.width = `${progreso}%`;
+      this.barGlobal.setAttribute('aria-valuenow', progreso.toFixed(1));
       this.barGlobal.classList.toggle('finished', estado.fase === 'finalizado');
     }
     if (this.statVms) this.statVms.textContent = `${estado.vms_procesadas || 0} / ${estado.total_vms || 0}`;
@@ -816,7 +818,11 @@ export class UIManager {
       if (this.lblVmIndividualPorcentaje) {
         this.lblVmIndividualPorcentaje.textContent = `${estado.progreso_vm_actual || 0}%`;
       }
-      if (this.barVmIndividual) this.barVmIndividual.style.width = `${estado.progreso_vm_actual || 0}%`;
+      if (this.barVmIndividual) {
+        const progresoVm = Math.min(100, Math.max(0, Number(estado.progreso_vm_actual) || 0));
+        this.barVmIndividual.style.width = `${progresoVm}%`;
+        this.barVmIndividual.setAttribute('aria-valuenow', progresoVm.toFixed(1));
+      }
       if (this.lblVmIndividualEtapa) {
         this.lblVmIndividualEtapa.textContent = estado.detalle_vm_actual
           ? `${estado.etapa_vm_actual} (${estado.detalle_vm_actual})`
@@ -836,7 +842,15 @@ export class UIManager {
     }
 
     if (this.wrapperBitacora && this.logConsole && this.habilitarBitacora && Array.isArray(estado.logs_recientes)) {
-      this.wrapperBitacora.style.display = 'flex';
+      this.wrapperBitacora.style.display = 'block';
+      const faseEnCurso = ['iniciando', 'escaneando_directorio', 'analizando_v_ms', 'generando_reporte']
+        .includes(estado.fase);
+      const mostrarBitacora = faseEnCurso || estado.fase === 'error' || estado.fase === 'cancelado';
+      if (mostrarBitacora) {
+        this.wrapperBitacora.setAttribute('open', '');
+      } else if (estado.fase === 'finalizado') {
+        this.wrapperBitacora.removeAttribute('open');
+      }
       this.logConsole.innerHTML = estado.logs_recientes.map((log) => {
         const levelClass: Record<string, string> = {
           info: 'log-info',
@@ -858,6 +872,7 @@ export class UIManager {
 
   renderResumenRelevamiento(resumen: ResumenRelevamiento): void {
     if (!this.analyzerSummary) return;
+    if (this.wrapperBitacora && !resumen.cancelado) this.wrapperBitacora.removeAttribute('open');
     this.analyzerSummary.style.display = 'block';
     this.analyzerSummary.textContent = resumen.cancelado
       ? `Relevamiento cancelado: ${resumen.total_vms} VM(s), informe parcial en ${resumen.ruta_informe || 'el destino seleccionado'}.`
@@ -866,6 +881,7 @@ export class UIManager {
 
   mostrarErrorAnalizador(error: unknown): void {
     if (!this.analyzerSummary) return;
+    if (this.wrapperBitacora && this.habilitarBitacora) this.wrapperBitacora.setAttribute('open', '');
     this.analyzerSummary.style.display = 'block';
     this.analyzerSummary.textContent = `No se pudo completar el relevamiento: ${String(error)}`;
   }

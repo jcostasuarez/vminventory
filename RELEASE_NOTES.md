@@ -1,3 +1,53 @@
+# VM Inventory v3.1.0 - Rediseño del Analizador y actualización de vmspect
+
+## 🚀 Resumen del lanzamiento
+
+La versión menor `v3.1.0` actualiza `vmspect` a `v0.5.0` y reorganiza el Analizador en dos fases persistentes: configuración de entrada y resultados con telemetría. También mejora la accesibilidad del flujo y conserva la bitácora técnica mediante divulgación progresiva.
+
+## 🔧 Cambios principales
+
+- **Motor actualizado:** `vmspect v0.5.0` diferencia la ausencia de `qemu-nbd` de los componentes VMDK faltantes y conserva diagnósticos de discos incompletos.
+- **Analizador rediseñado:** la selección de origen, destino y nombre del informe se presenta junto a una superficie dedicada para resultados, progreso y métricas.
+- **Telemetría accesible:** se incorporan controles semánticos, regiones vivas, barras de progreso con valores ARIA y estilos de foco visibles.
+- **Bitácora progresiva:** el registro técnico se abre durante la ejecución o ante errores y se repliega al finalizar correctamente.
+
+## 📦 Artefactos de descarga
+
+| Plataforma | Artefacto | Tamaño | Descripción |
+| :--- | :--- | ---: | :--- |
+| **Windows x64** | `VM Inventory_3.1.0_x64-setup.exe` | 2,844,686 bytes | Instalador NSIS estándar para Windows 10/11 |
+| **Windows x64** | `VM Inventory_3.1.0_x64_en-US.msi` | 4,247,552 bytes | Paquete MSI para despliegue empresarial |
+| **Código fuente** | `v3.1.0.tar.gz` / `v3.1.0.zip` | — | Generados automáticamente por GitHub al publicar el tag |
+
+## 🔒 Integridad SHA-256
+
+| Artefacto | SHA-256 |
+| :--- | :--- |
+| `VM Inventory_3.1.0_x64-setup.exe` | `aeecde4eef24c4eb21acd98d928606733f3773acce6f74d042fe44888e2eb05f` |
+| `VM Inventory_3.1.0_x64_en-US.msi` | `fcbb3979dfdcad2e0c32f736c7593744d59593207ba3c4a0b12cb1f4212a9fc8` |
+
+Para verificar un archivo descargado desde PowerShell:
+
+```powershell
+Get-FileHash -Path ".\VM Inventory_3.1.0_x64-setup.exe" -Algorithm SHA256
+Get-FileHash -Path ".\VM Inventory_3.1.0_x64_en-US.msi" -Algorithm SHA256
+```
+
+## ✅ Verificación del release
+
+- `npm run typecheck`
+- `npm test`: 7 contratos frontend y 4 contratos backend aprobados.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- `npm run build`
+- `npm run tauri build`: bundles NSIS y MSI Windows x64 generados correctamente con `vmspect v0.5.0`.
+
+Los instaladores se generan en:
+
+- `src-tauri/target/release/bundle/nsis/VM Inventory_3.1.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/VM Inventory_3.1.0_x64_en-US.msi`
+
+---
+
 # VM Inventory v3.0.0 - Delegación completa de qemu-nbd
 
 ## 🚀 Resumen del lanzamiento

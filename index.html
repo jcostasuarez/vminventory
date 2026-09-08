@@ -81,56 +81,96 @@
         </div>
       </div>
 
-      <div class="steps-container">
-        <div class="step-card" id="cardStepOrigen" role="button" tabindex="0" title="Seleccionar carpeta de origen con VMs">
-          <div class="step-icon-box">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
-          </div>
-          <div class="step-details"><div class="step-title">Origen</div><div class="step-subtitle" id="lblOrigen">Seleccionar carpeta</div></div>
-        </div>
-        <div class="step-card" id="cardStepDestino" role="button" tabindex="0" title="Seleccionar carpeta donde guardar el reporte JSON">
-          <div class="step-icon-box">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-            </svg>
-          </div>
-          <div class="step-details"><div class="step-title">Destino</div><div class="step-subtitle" id="lblDestino">Seleccionar carpeta</div></div>
-        </div>
-        <div class="step-card step-card-input ready" id="cardStepNombreJson">
-          <div class="step-icon-box">
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
-          </div>
-          <div class="step-details"><div class="step-title">Nombre JSON</div><div class="step-input-wrapper"><input type="text" id="inputNombreArchivoSalida" class="step-inline-input" value="Relevamiento_VMs.json" autocomplete="off" /></div></div>
-        </div>
-        <button class="step-card action-card" id="btnIniciarAccion" type="button" disabled>
-          <div class="step-icon-box" id="iconAnalisis"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" /></svg></div>
-          <div class="step-details"><div class="step-title" id="lblTitleAccion">Análisis</div><div class="step-subtitle" id="lblHilosAccion">Pendiente</div></div>
-        </button>
-      </div>
+      <div class="analyzer-workspace">
+        <section class="analyzer-phase analyzer-config-panel" aria-labelledby="analyzerConfigTitle">
+          <header class="phase-heading">
+            <div class="phase-index">01 <span>/ ENTRADA</span></div>
+            <h2 id="analyzerConfigTitle">Configuración de parámetros</h2>
+            <p>Define el origen, el destino y el nombre del informe antes de iniciar la inspección.</p>
+          </header>
 
-      <div class="telemetry-deck">
-        <div class="telemetry-main-row">
-          <div class="telemetry-status-text"><span class="status-badge idle" id="badgeFase">Inactivo</span><span id="lblProgresoMsg">Selecciona origen y destino para iniciar.</span></div>
-          <div class="telemetry-percentage" id="lblBigPorcentaje">0.0%</div>
-        </div>
-        <div class="progress-rail"><div class="progress-fill" id="barGlobal"></div></div>
-        <div class="telemetry-kpi-grid">
-          <div class="telemetry-kpi-card"><div class="telemetry-kpi-label">Progreso VMs</div><div class="telemetry-kpi-value" id="statVms">0 / 0</div><div class="telemetry-kpi-sub">VMs procesadas</div></div>
-          <div class="telemetry-kpi-card"><div class="telemetry-kpi-label">Estado</div><div class="telemetry-kpi-value text-success" id="statExitosas">✓ 0 exitosas</div><div class="telemetry-kpi-sub"><span class="metric-badge-warn" id="statObservaciones" style="display:none">⚠ 0 obs.</span></div></div>
-          <div class="telemetry-kpi-card"><div class="telemetry-kpi-label">Velocidad</div><div class="telemetry-kpi-value text-accent" id="statVelocidad">0.0 VM/min</div><div class="telemetry-kpi-sub">Procesamiento multihilo</div></div>
-          <div class="telemetry-kpi-card"><div class="telemetry-kpi-label">Tiempo</div><div class="telemetry-kpi-value" id="statTiempo">00:00</div><div class="telemetry-kpi-sub"><span id="itemEta" style="display:none"><strong id="statEta">ETA: --:--</strong></span></div></div>
-        </div>
-        <div class="workers-box" id="wrapperWorkers" style="display:none"><div class="telemetry-kpi-label">Workers activos</div><div id="listWorkers"></div></div>
-        <div class="inspector-progress-box" id="wrapperVmIndividual" style="display:none">
-          <div style="display:flex;justify-content:space-between;gap:10px"><strong id="lblVmIndividualTitulo">VM actual</strong><span id="lblVmIndividualPorcentaje">0%</span></div>
-          <div class="progress-rail"><div class="progress-fill" id="barVmIndividual" style="background:#06b6d4"></div></div>
-          <div class="form-help" id="lblVmIndividualEtapa">En espera</div>
-        </div>
-        <div id="wrapperBitacora" style="display:none;flex-direction:column;gap:6px"><div class="telemetry-kpi-label">Bitácora</div><div class="terminal-deck" id="logConsole"></div></div>
+          <div class="steps-container">
+            <button class="step-card" id="cardStepOrigen" type="button" title="Seleccionar carpeta de origen con VMs">
+              <span class="step-icon-box">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              </span>
+              <span class="step-details"><span class="step-title">Origen</span><span class="step-subtitle" id="lblOrigen">Seleccionar carpeta</span></span>
+            </button>
+            <button class="step-card" id="cardStepDestino" type="button" title="Seleccionar carpeta donde guardar el reporte JSON">
+              <span class="step-icon-box">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+              </span>
+              <span class="step-details"><span class="step-title">Destino</span><span class="step-subtitle" id="lblDestino">Seleccionar carpeta</span></span>
+            </button>
+            <div class="step-card step-card-input ready" id="cardStepNombreJson">
+              <div class="step-icon-box">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+              </div>
+              <label class="step-details" for="inputNombreArchivoSalida"><span class="step-title">Nombre JSON</span><span class="step-input-wrapper"><input type="text" id="inputNombreArchivoSalida" class="step-inline-input" value="Relevamiento_VMs.json" autocomplete="off" /></span></label>
+            </div>
+            <button class="step-card action-card" id="btnIniciarAccion" type="button" disabled>
+              <span class="step-icon-box" id="iconAnalisis"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" /></svg></span>
+              <span class="step-details"><span class="step-title" id="lblTitleAccion">Análisis</span><span class="step-subtitle" id="lblHilosAccion">Pendiente</span></span>
+            </button>
+          </div>
+        </section>
+
+        <section class="analyzer-phase analyzer-results-panel" aria-labelledby="analyzerResultsTitle">
+          <header class="phase-heading">
+            <div class="phase-index">02 <span>/ SALIDA</span></div>
+            <h2 id="analyzerResultsTitle">Resultados y telemetría</h2>
+            <p>Supervisa el avance, el rendimiento y las incidencias del procesamiento.</p>
+          </header>
+
+          <div class="telemetry-deck">
+            <div class="telemetry-main-row">
+              <div class="telemetry-status-text" role="status" aria-live="polite"><span class="status-badge idle" id="badgeFase">Inactivo</span><span id="lblProgresoMsg">Selecciona origen y destino para iniciar.</span></div>
+              <div class="telemetry-percentage" id="lblBigPorcentaje" aria-live="polite" aria-label="Porcentaje de avance">0.0%</div>
+            </div>
+            <div class="progress-rail"><div class="progress-fill" id="barGlobal" role="progressbar" aria-label="Progreso global del relevamiento" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
+            <div class="data-ribbon" role="list" aria-label="Métricas del relevamiento">
+              <div class="data-ribbon-item" role="listitem">
+                <div class="telemetry-kpi-label">Progreso VMs</div>
+                <output class="telemetry-kpi-value" id="statVms">0 / 0</output>
+                <div class="telemetry-kpi-sub">VMs procesadas</div>
+              </div>
+              <div class="data-ribbon-item" role="listitem">
+                <div class="telemetry-kpi-label">Estado</div>
+                <output class="telemetry-kpi-value text-success" id="statExitosas">✓ 0 exitosas</output>
+                <div class="telemetry-kpi-sub"><span class="metric-badge-warn" id="statObservaciones" style="display:none">⚠ 0 obs.</span></div>
+              </div>
+              <div class="data-ribbon-item" role="listitem">
+                <div class="telemetry-kpi-label">Velocidad</div>
+                <output class="telemetry-kpi-value text-accent" id="statVelocidad">0.0 VM/min</output>
+                <div class="telemetry-kpi-sub">Procesamiento multihilo</div>
+              </div>
+              <div class="data-ribbon-item" role="listitem">
+                <div class="telemetry-kpi-label">Tiempo</div>
+                <output class="telemetry-kpi-value" id="statTiempo">00:00</output>
+                <div class="telemetry-kpi-sub"><span id="itemEta" style="display:none"><strong id="statEta">ETA: --:--</strong></span></div>
+              </div>
+            </div>
+            <div class="workers-box" id="wrapperWorkers" style="display:none"><div class="telemetry-kpi-label">Workers activos</div><div id="listWorkers"></div></div>
+            <div class="inspector-progress-box" id="wrapperVmIndividual" style="display:none">
+              <div style="display:flex;justify-content:space-between;gap:10px"><strong id="lblVmIndividualTitulo">VM actual</strong><span id="lblVmIndividualPorcentaje">0%</span></div>
+              <div class="progress-rail"><div class="progress-fill progress-fill-individual" id="barVmIndividual" role="progressbar" aria-label="Progreso de la VM actual" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
+              <div class="form-help" id="lblVmIndividualEtapa">En espera</div>
+            </div>
+            <details id="wrapperBitacora" class="bitacora-details" style="display:none">
+              <summary class="bitacora-summary">
+                <span class="bitacora-summary-title"><span class="status-dot" aria-hidden="true"></span>Bitácora de ejecución</span>
+                <span class="bitacora-summary-hint">Abrir para ver el registro técnico</span>
+              </summary>
+              <div class="terminal-deck" id="logConsole"></div>
+            </details>
+          </div>
+          <div class="analyzer-summary" id="analyzerSummary" style="display:none"></div>
+        </section>
       </div>
-      <div class="analyzer-summary" id="analyzerSummary" style="display:none"></div>
     </section>
 
     <section class="tool-view-panel" id="viewConsultor">
@@ -237,8 +277,8 @@
           <button class="step-btn" id="btnSeleccionarDiscoReporte" type="button">Examinar</button>
         </div>
         <button class="step-card action-card" id="btnIniciarReporte" type="button" disabled>
-          <div class="step-icon-box"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" /></svg></div>
-          <div class="step-details"><div class="step-title">Generar reporte</div><div class="step-subtitle">Inspección con vmspect</div></div>
+          <span class="step-icon-box"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" /></svg></span>
+          <span class="step-details"><span class="step-title">Generar reporte</span><span class="step-subtitle">Inspección con vmspect</span></span>
         </button>
       </div>
 

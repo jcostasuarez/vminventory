@@ -2,11 +2,11 @@
 
 > **Auditoría, relevamiento masivo e inspección estática forense de máquinas virtuales.**
 
-[![Release](https://img.shields.io/badge/Release-v3.0.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v3.0.0)
+[![Release](https://img.shields.io/badge/Release-v3.1.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v3.1.0)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.77+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0+-646CFF.svg?logo=vite)](https://vitejs.dev/)
-[![Engine](https://img.shields.io/badge/Engine-vmspect_v0.4.2-emerald.svg)](https://crates.io/crates/vmspect)
+[![Engine](https://img.shields.io/badge/Engine-vmspect_v0.5.0-emerald.svg)](https://crates.io/crates/vmspect)
 [![Backend](https://img.shields.io/badge/NBD-qemu--nbd-purple.svg)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#)
 
@@ -282,6 +282,14 @@ Gracias a la integración con el motor `vmspect` y `qemu-nbd`:
 ---
 
 ## 📝 Changelog
+
+### [v3.1.0] - 2026-09-08 (Rediseño del Analizador y actualización de vmspect)
+- **Motor actualizado:** VM Inventory utiliza `vmspect v0.5.0`, con diagnóstico diferenciado para `qemu-nbd` ausente y componentes VMDK faltantes.
+- **Flujo del Analizador rediseñado:** la configuración de entrada y la salida con telemetría se organizan en dos fases persistentes, con diseño responsive para ventanas más estrechas.
+- **Telemetría accesible:** los controles interactivos usan elementos semánticos, regiones vivas y barras de progreso con valores ARIA para facilitar la supervisión del relevamiento.
+- **Bitácora progresiva:** el registro técnico se presenta como un panel desplegable que se abre durante la ejecución o ante errores y se repliega al finalizar correctamente.
+- **Diagnóstico de discos:** los errores de extents, padres y descriptores VMDK faltantes se preservan como componentes de disco ausentes, sin clasificarlos erróneamente como ausencia de `qemu-nbd`.
+- **Verificación:** TypeScript, contratos frontend/backend, formato Rust y build Vite verificados antes del empaquetado.
 
 ### [v3.0.0] - 2026-09-08 (Delegación completa de qemu-nbd)
 - **Cambio rompedor:** se eliminan el comando Tauri `validar_binario_qemu`, el método frontend `validarQemu` y los controles de validación manual de `qemu-nbd`.
