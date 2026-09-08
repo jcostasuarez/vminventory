@@ -1,3 +1,53 @@
+# VM Inventory v2.3.0 - Descubrimiento y concurrencia con vmspect
+
+## 🚀 Resumen del lanzamiento
+
+La versión menor `v2.3.0` delega el descubrimiento recursivo, la concurrencia, la inspección y la cancelación en la API pública de `vmspect`, conservando el contrato de inventario JSON, la clasificación y la supervisión Tauri. No se introduce una ruptura confirmada en la interfaz pública de la aplicación.
+
+### 🌟 Principales mejoras y novedades
+
+- **Descubrimiento único:** `vmspect::list_vms` recorre el origen recursivamente y filtra extents secundarios sin mantener un segundo walker en la aplicación.
+- **Procesamiento concurrente:** `vmspect::ConcurrentProcessor` y `InspectionEngine` coordinan workers, resultados por imagen y cancelación compartida.
+- **Telemetría integrada:** Los eventos de progreso y la duración de cada inspección se traducen al contrato de supervisión existente.
+- **Tolerancia a fallos:** Un error de una imagen se conserva como observación en el inventario sin descartar el resto del lote.
+- **Compatibilidad funcional:** Las exclusiones configurables, la clasificación de programas, las discrepancias y la persistencia JSON siguen gestionándose desde VM Inventory.
+
+## 📦 Artefactos de descarga
+
+| Plataforma | Artefacto | Tamaño | Descripción |
+| :--- | :--- | ---: | :--- |
+| **Windows x64** | `VM Inventory_2.3.0_x64-setup.exe` | 2,846,961 bytes (2.72 MiB) | Instalador NSIS estándar para Windows 10/11 |
+| **Windows x64** | `VM Inventory_2.3.0_x64_en-US.msi` | 4,251,648 bytes (4.05 MiB) | Paquete MSI para despliegue empresarial |
+| **Código fuente** | `v2.3.0.tar.gz` / `v2.3.0.zip` | — | Generados automáticamente por GitHub al publicar el tag |
+
+## 🔒 Integridad SHA-256
+
+| Artefacto | SHA-256 |
+| :--- | :--- |
+| `VM Inventory_2.3.0_x64-setup.exe` | `dbb8d1b39a379a27186cbceafe54bf2f89166a1ca779b924e64694eec8eb1fdb` |
+| `VM Inventory_2.3.0_x64_en-US.msi` | `dae4b7a21cf1f8633330141ecf333bdc0c50a4d010e44d004af530546e907bae` |
+
+Para verificar un archivo descargado desde PowerShell:
+
+```powershell
+Get-FileHash -Path ".\VM Inventory_2.3.0_x64-setup.exe" -Algorithm SHA256
+Get-FileHash -Path ".\VM Inventory_2.3.0_x64_en-US.msi" -Algorithm SHA256
+```
+
+## ✅ Verificación del release
+
+- `npm run typecheck`
+- `npm test`: 7 contratos frontend y 4 contratos backend aprobados.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- `npm run tauri build`: bundles NSIS y MSI Windows x64 generados correctamente.
+
+Los instaladores se generan en:
+
+- `src-tauri/target/release/bundle/nsis/VM Inventory_2.3.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/VM Inventory_2.3.0_x64_en-US.msi`
+
+---
+
 # VM Inventory v2.2.0 - Frontend TypeScript y contratos backend
 
 ## 🚀 Resumen del lanzamiento

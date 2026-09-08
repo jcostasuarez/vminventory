@@ -1,17 +1,16 @@
-//! # Motor de Relevamiento Masivo
-//! Pipeline de supervisión multihilo que:
+//! # Relevamiento masivo de máquinas virtuales
 //!
-//! 1. Descubre imágenes de disco de forma recursiva y tolerante a fallos de
-//!    permisos con `vmspect::is_vm_image` (`.qcow2`, `.raw`, `.vmdk`, `.vdi`,
-//!    `.vhdx`, ...), filtrando extents secundarios.
-//! 2. Agrupa las imágenes por carpeta contenedora (una carpeta = una VM) e
-//!    inspecciona sus discos en paralelo con un pool de hilos acotado por
-//!    `max_hilos`.
-//! 3. Emite telemetría en vivo (`progreso_supervision`) con progreso global,
-//!    workers activos, bitácora y ETA.
-//! 4. Soporta cancelación limpia (graceful shutdown) preservando los informes
-//!    completados hasta el momento de la interrupción.
-//! 5. Consolida la base de datos indexada en JSON para el Consultor.
+//! El descubrimiento y el procesamiento de imágenes pertenecen exclusivamente a
+//! la API pública de `vmspect`:
+//!
+//! 1. `vmspect::list_vms(..., true)` descubre recursivamente las imágenes y
+//!    filtra extensiones secundarias.
+//! 2. `vmspect::ConcurrentProcessor` coordina la concurrencia y la cancelación.
+//! 3. `vmspect::InspectionEngine` realiza cada inspección.
+//!
+//! Este módulo conserva únicamente la integración de la aplicación: telemetría
+//! Tauri, clasificación de software, enriquecimiento de metadatos y persistencia
+//! del inventario JSON.
 
 use crate::clasificacion::ReglasClasificacion;
 use crate::models::{
@@ -23,17 +22,17 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
-use vmspect::{Options, VmSpectError};
+use vmspect::VmSpectError;
 
 /// Capacidad máxima de la bitácora en vivo (entradas rotativas).
 const CAPACIDAD_LOGS: usize = 40;
 /// GiB exacto, coherente con `formatearBytes` del frontend (base 1024).
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
 
-type TrabajoVm = (usize, String, PathBuf, Vec<PathBuf>);
+type ResultadoImagen = std::result::Result<vmspect::InspectionReport, VmSpectError>;
+type ResultadoTrabajo = (usize, PathBuf, ResultadoImagen);
 
 // ============================================================================
 // UTILIDADES DE TIEMPO (UTC, sin dependencias externas)
@@ -127,11 +126,14 @@ pub(crate) fn clasificar_programas(
 }
 
 // ============================================================================
-// SUPERVISIÓN (telemetría compartida entre hilos)
+// SUPERVISIÓN (telemetría compartida entre trabajadores de vmspect)
 // ============================================================================
 
-/// Contadores, bitácora y progreso del relevamiento compartidos por los hilos
-/// trabajadores (todo lock-free salvo la bitácora y el mapa de workers).
+/// Contadores, bitácora y progreso del relevamiento.
+///
+/// La inspección no se ejecuta aquí: los trabajadores pertenecen a
+/// `vmspect::ConcurrentProcessor`. Esta estructura solo agrega telemetría de la
+/// aplicación alrededor de esos trabajadores.
 struct Supervision {
     cancelacion: Arc<AtomicBool>,
     total_vms: usize,
@@ -209,7 +211,7 @@ impl Supervision {
         }
     }
 
-    /// Construye el paquete de telemetría consumido por `telemetry.js`.
+    /// Construye el paquete de telemetría consumido por la interfaz.
     fn snapshot(&self, fase: &str, mensaje: String) -> EstadoSupervision {
         let procesadas = self.procesadas.load(Ordering::Relaxed);
         let activas: Vec<VmActiva> = self
@@ -285,134 +287,68 @@ impl Supervision {
     }
 }
 
-// ============================================================================
-// DESCUBRIMIENTO RESILIENTE DE IMÁGENES
-// ============================================================================
+fn resumen_cancelado() -> ResumenRelevamiento {
+    ResumenRelevamiento {
+        fase: "cancelado".to_string(),
+        total_vms: 0,
+        vms_exitosas: 0,
+        vms_con_observaciones: 0,
+        vms_discrepantes: 0,
+        vms_fallidas: 0,
+        total_programas: 0,
+        peso_total_gb: 0.0,
+        duracion_formateada: "0s".to_string(),
+        ruta_informe: String::new(),
+        cancelado: true,
+    }
+}
 
-/// Descubre recursivamente todas las imágenes de disco virtuales en un directorio.
-///
-/// A diferencia de una búsqueda recursiva rígida, maneja de forma tolerante a fallos
-/// los errores de permisos (`ERROR_ACCESS_DENIED` / os error 5, carpetas del sistema,
-/// `$RECYCLE.BIN`, etc.) en subdirectorios, omitiéndolos con una advertencia en la bitácora
-/// y permitiendo que el escaneo continúe en el resto del árbol de directorios.
-fn descubrir_imagenes(
+/// Conserva la política de exclusiones de la aplicación sin reemplazar el
+/// descubrimiento recursivo de `vmspect`.
+fn aplicar_exclusiones_vmspect(
+    imagenes: Vec<PathBuf>,
     origen: &Path,
-    supervision: &mut Supervision,
-    app: Option<&AppHandle>,
     exclusiones: &crate::clasificacion::ExclusionesConfig,
-) -> Result<Vec<PathBuf>, String> {
-    if !origen.exists() {
-        return Err(format!(
-            "El directorio origen no existe: {}",
-            origen.display()
-        ));
-    }
-    if !origen.is_dir() {
-        return Err(format!(
-            "La ruta especificada no es un directorio: {}",
-            origen.display()
-        ));
-    }
-
-    let mut imagenes = Vec::new();
-    let mut cola = VecDeque::new();
-    cola.push_back(origen.to_path_buf());
-
-    while let Some(directorio_actual) = cola.pop_front() {
-        if supervision.cancelada() {
-            break;
-        }
-
-        let entradas = match std::fs::read_dir(&directorio_actual) {
-            Ok(e) => e,
-            Err(e) => {
-                if directorio_actual == origen {
-                    let detalle = if e.kind() == std::io::ErrorKind::PermissionDenied
-                        || e.raw_os_error() == Some(5)
-                    {
-                        format!(
-                            "Acceso denegado al directorio «{}». Verifique los permisos de la carpeta o ejecute la aplicación como Administrador.",
-                            origen.display()
-                        )
-                    } else {
-                        format!(
-                            "No se pudo acceder al directorio «{}»: {e}",
-                            origen.display()
-                        )
-                    };
-                    return Err(detalle);
-                } else {
-                    supervision.registrar_log(
-                        "advertencia",
-                        "",
-                        format!(
-                            "Subcarpeta omitida por falta de permisos o inaccesible: {}",
-                            directorio_actual.display()
-                        ),
-                    );
-                    if let Some(app) = app {
-                        supervision.emitir(
-                            app,
-                            "escaneando_directorio",
-                            format!("Escaneando «{}»...", origen.display()),
-                        );
-                    }
-                    continue;
-                }
-            }
-        };
-
-        for entrada in entradas {
-            if supervision.cancelada() {
-                break;
+) -> Vec<PathBuf> {
+    imagenes
+        .into_iter()
+        .filter(|ruta| {
+            let nombre_archivo = ruta
+                .file_name()
+                .and_then(|nombre| nombre.to_str())
+                .unwrap_or("");
+            if exclusiones.es_archivo_excluido(nombre_archivo) {
+                return false;
             }
 
-            let entrada = match entrada {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-
-            let path = entrada.path();
-            let file_type = match entrada.file_type() {
-                Ok(ft) => ft,
-                Err(_) => continue,
-            };
-
-            let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-            if file_type.is_dir() {
-                if exclusiones.es_carpeta_excluida(file_name) {
-                    supervision.registrar_log(
-                        "info",
-                        "",
-                        format!(
-                            "Directorio omitido por regla de exclusión: {}",
-                            path.display()
-                        ),
-                    );
-                    continue;
+            let mut directorio = ruta.parent();
+            while let Some(actual) = directorio {
+                if actual == origen || !actual.starts_with(origen) {
+                    break;
                 }
-                cola.push_back(path);
-            } else if file_type.is_file() {
-                if exclusiones.es_archivo_excluido(file_name) {
-                    continue;
+                let nombre = actual
+                    .file_name()
+                    .and_then(|valor| valor.to_str())
+                    .unwrap_or("");
+                if exclusiones.es_carpeta_excluida(nombre) {
+                    return false;
                 }
-                if vmspect_backend::es_imagen_vm(&path) {
-                    imagenes.push(path);
-                }
+                directorio = actual.parent();
             }
-        }
-    }
-
-    imagenes.sort();
-    Ok(imagenes)
+            true
+        })
+        .collect()
 }
 
 // ============================================================================
-// PIPELINE PRINCIPAL
+// PIPELINE PRINCIPAL: descubrimiento y análisis delegados a vmspect
 // ============================================================================
 
-/// Ejecuta el relevamiento completo de un directorio de VMs.
+/// Ejecuta el relevamiento recursivo de un directorio de VMs.
+///
+/// La aplicación no implementa una búsqueda de archivos ni un pool de análisis:
+/// ambas operaciones se delegan a `vmspect::list_vms` y a
+/// `vmspect::ConcurrentProcessor`, respectivamente.
 pub fn ejecutar_relevamiento(
     app: &AppHandle,
     cancelacion: Arc<AtomicBool>,
@@ -421,230 +357,199 @@ pub fn ejecutar_relevamiento(
     generar_discrepancias: bool,
     config: &ConfiguracionApp,
 ) -> Result<ResumenRelevamiento, String> {
-    // --- Validación de rutas -------------------------------------------------
     let origen = PathBuf::from(ruta_origen);
     if !origen.is_dir() {
         return Err(format!(
             "El directorio de origen no existe o no es válido: {ruta_origen}"
         ));
     }
+
     let destino = PathBuf::from(ruta_destino);
     std::fs::create_dir_all(&destino)
         .map_err(|e| format!("No se pudo preparar el directorio destino ({ruta_destino}): {e}"))?;
 
     let mut supervision = Supervision::new(cancelacion.clone());
     if supervision.cancelada() {
-        return Ok(ResumenRelevamiento {
-            fase: "cancelado".to_string(),
-            total_vms: 0,
-            vms_exitosas: 0,
-            vms_con_observaciones: 0,
-            vms_discrepantes: 0,
-            vms_fallidas: 0,
-            total_programas: 0,
-            peso_total_gb: 0.0,
-            duracion_formateada: "0s".to_string(),
-            ruta_informe: String::new(),
-            cancelado: true,
-        });
+        return Ok(resumen_cancelado());
     }
 
     supervision.emitir(
         app,
         "iniciando",
-        "Preparando motor de inspección de discos...".to_string(),
+        "Preparando el motor vmspect para el relevamiento recursivo...".to_string(),
     );
 
-    // --- Fase 1: descubrimiento de imágenes con reglas de exclusión --------
     let reglas = ReglasClasificacion::cargar(config.ruta_reglas.as_deref());
 
     supervision.emitir(
         app,
         "escaneando_directorio",
-        format!("Escaneando «{ruta_origen}» en busca de imágenes de disco..."),
+        format!("vmspect está descubriendo recursivamente imágenes en «{ruta_origen}»..."),
     );
-    let imagenes =
-        match descubrir_imagenes(&origen, &mut supervision, Some(app), &reglas.exclusions) {
-            Ok(lista) => lista,
-            Err(e) => {
-                supervision.emitir(
-                    app,
-                    "error",
-                    format!("Fallo el escaneo del directorio: {e}"),
-                );
-                return Err(e);
-            }
-        };
+
+    // El descubrimiento recursivo, los formatos soportados y el filtrado de
+    // extents secundarios pertenecen a vmspect. Las exclusiones configurables
+    // de la app se aplican únicamente sobre las rutas ya descubiertas; no
+    // existe un segundo recorrido recursivo propio.
+    let descubiertas = match vmspect::list_vms(&origen, true) {
+        Ok(lista) => lista,
+        Err(error) => {
+            let detalle = format!("Fallo el descubrimiento recursivo de vmspect: {error}");
+            supervision.emitir(app, "error", detalle.clone());
+            return Err(detalle);
+        }
+    };
 
     if supervision.cancelada() {
-        return Ok(ResumenRelevamiento {
-            fase: "cancelado".to_string(),
-            total_vms: 0,
-            vms_exitosas: 0,
-            vms_con_observaciones: 0,
-            vms_discrepantes: 0,
-            vms_fallidas: 0,
-            total_programas: 0,
-            peso_total_gb: 0.0,
-            duracion_formateada: "0s".to_string(),
-            ruta_informe: String::new(),
-            cancelado: true,
-        });
+        return Ok(resumen_cancelado());
     }
 
-    // --- Fase 2: agrupación por carpeta (una carpeta = una VM) ----------------
-    let mut grupos: BTreeMap<PathBuf, Vec<PathBuf>> = BTreeMap::new();
-    for imagen in imagenes {
-        if let Some(carpeta) = imagen.parent() {
-            grupos
-                .entry(carpeta.to_path_buf())
-                .or_default()
-                .push(imagen);
-        }
-    }
-    // El disco del sistema suele ser el mayor de la carpeta.
-    for discos in grupos.values_mut() {
-        discos.sort_by_key(|d| std::fs::metadata(d).map(|m| m.len()).unwrap_or(0));
-        discos.reverse();
-    }
-
-    let total_vms = grupos.len();
+    let imagenes = aplicar_exclusiones_vmspect(descubiertas, &origen, &reglas.exclusions);
+    let total_vms = imagenes.len();
     supervision.total_vms = total_vms;
     supervision.emitir(
         app,
         "escaneando_directorio",
-        format!("Se detectaron {total_vms} máquinas virtuales potenciales."),
+        format!("vmspect detectó {total_vms} imágenes de máquinas virtuales."),
     );
+
     if total_vms > 0 {
         supervision.registrar_log(
             "info",
             "",
-            format!("Relevamiento iniciado sobre {total_vms} VMs."),
+            format!("Relevamiento vmspect iniciado sobre {total_vms} imágenes."),
         );
     }
 
-    // --- Fase 3: inspección concurrente ---------------------------------------
-    let hilos = config.max_hilos.unwrap_or(4).clamp(1, 16);
-    let opciones = vmspect_backend::construir_opciones(config, &cancelacion);
-
-    let cola: Mutex<VecDeque<TrabajoVm>> = Mutex::new(
-        grupos
-            .into_iter()
-            .enumerate()
-            .map(|(i, (carpeta, discos))| {
-                let nombre = carpeta
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| carpeta.to_string_lossy().to_string());
-                (i + 1, nombre, carpeta, discos)
-            })
-            .collect(),
-    );
-    let informes: Mutex<Vec<(usize, RegistroVM)>> = Mutex::new(Vec::new());
-    let contexto = ContextoInspeccion {
-        supervision: &supervision,
-        app,
-        opciones: &opciones,
-        generar_discrepancias,
-        config,
-        reglas: &reglas,
-    };
-
-    if total_vms > 0 {
-        thread::scope(|s| {
-            for _ in 0..hilos.min(total_vms) {
-                s.spawn(|| loop {
-                    if supervision.cancelada() {
-                        break;
-                    }
-                    let tarea = cola.lock().unwrap_or_else(|e| e.into_inner()).pop_front();
-                    let Some((indice, nombre, carpeta, discos)) = tarea else {
-                        break;
-                    };
-                    if supervision.cancelada() {
-                        break;
-                    }
-
-                    supervision.actualizar_activa(
-                        indice,
-                        &nombre,
-                        "Preparando discos",
-                        2,
-                        Some(format!("{} disco(s) en la carpeta", discos.len())),
-                    );
-                    supervision.emitir(
-                        app,
-                        "analizando_v_ms",
-                        format!("Iniciando inspección de «{nombre}»..."),
-                    );
-
-                    let registro = inspeccionar_vm(&contexto, indice, &nombre, &carpeta, &discos);
-
-                    supervision.remover_activa(indice);
-                    supervision.procesadas.fetch_add(1, Ordering::Relaxed);
-                    supervision
-                        .peso_bytes
-                        .fetch_add(registro.peso_bytes, Ordering::Relaxed);
-
-                    if registro.exitosa {
-                        if registro.observaciones.is_empty() {
-                            supervision.exitosas.fetch_add(1, Ordering::Relaxed);
-                            supervision.registrar_log(
-                                "exito",
-                                &nombre,
-                                format!(
-                                    "Inspección completa: {} programas indexados.",
-                                    registro.programas.len()
-                                ),
-                            );
-                        } else {
-                            supervision
-                                .con_observaciones
-                                .fetch_add(1, Ordering::Relaxed);
-                            supervision.registrar_log(
-                                "advertencia",
-                                &nombre,
-                                registro.observaciones.join(" | "),
-                            );
-                        }
-                    } else {
-                        supervision.fallidas.fetch_add(1, Ordering::Relaxed);
-                        supervision.registrar_log(
-                            "error",
-                            &nombre,
-                            registro.observaciones.join(" | "),
-                        );
-                    }
-                    if registro.discrepante {
-                        supervision.discrepantes.fetch_add(1, Ordering::Relaxed);
-                    }
-
-                    supervision.emitir(
-                        app,
-                        "analizando_v_ms",
-                        format!(
-                            "Finalizada «{nombre}» ({}/{}).",
-                            supervision.procesadas.load(Ordering::Relaxed),
-                            total_vms
-                        ),
-                    );
-                    if let Ok(mut guardia) = informes.lock() {
-                        guardia.push((indice, registro));
-                    }
-                });
-            }
-        });
+    if supervision.cancelada() {
+        return Ok(resumen_cancelado());
     }
 
-    // --- Fase 4: consolidación de la base de datos ----------------------------
+    let opciones = vmspect_backend::construir_opciones(config, &cancelacion);
+    let hilos = config.max_hilos.unwrap_or(4).clamp(1, 32);
+    let supervision = Arc::new(supervision);
+    let supervision_workers = Arc::clone(&supervision);
+    let app_handle = app.clone();
+
+    // La concurrencia, la cola de trabajos, el join de trabajadores y la
+    // cancelación son responsabilidad de la API pública de vmspect. El valor
+    // interno del resultado conserva los errores por imagen para que una VM
+    // dañada no descarte el resto del relevamiento.
+    let trabajos = imagenes
+        .into_iter()
+        .enumerate()
+        .map(|(indice, ruta)| (indice + 1, ruta))
+        .collect::<Vec<_>>();
+    let progreso_motor = Arc::new(vmspect::InspectionProgress::new());
+    let resultados: Vec<ResultadoTrabajo> = vmspect::ConcurrentProcessor::process_in_parallel(
+        trabajos,
+        Some(cancelacion.clone()),
+        Some(progreso_motor),
+        hilos,
+        move |(indice, ruta)| {
+            let nombre = nombre_vm_desde_ruta(&ruta);
+            supervision_workers.actualizar_activa(
+                indice,
+                &nombre,
+                "Preparando inspección vmspect",
+                0,
+                Some(ruta.display().to_string()),
+            );
+            supervision_workers.emitir(
+                &app_handle,
+                "analizando_v_ms",
+                format!("vmspect inició la inspección de «{nombre}»..."),
+            );
+
+            let inicio_imagen = Instant::now();
+            let motor = vmspect::InspectionEngine::new(opciones.clone());
+            let resultado = motor.inspect_with_progress(&ruta, |evento| {
+                if supervision_workers.cancelada() {
+                    return;
+                }
+                supervision_workers.actualizar_activa(
+                    indice,
+                    &nombre,
+                    &evento.stage,
+                    evento.percentage,
+                    evento.detail.clone(),
+                );
+                supervision_workers.emitir(
+                    &app_handle,
+                    "analizando_v_ms",
+                    format!("Inspeccionando «{nombre}» con vmspect"),
+                );
+            });
+
+            supervision_workers.remover_activa(indice);
+            supervision_workers
+                .procesadas
+                .fetch_add(1, Ordering::Relaxed);
+            let peso = match resultado.as_ref() {
+                Ok(reporte) => reporte.image.actual_size,
+                Err(_) => std::fs::metadata(&ruta).map(|m| m.len()).unwrap_or(0),
+            };
+            supervision_workers
+                .peso_bytes
+                .fetch_add(peso, Ordering::Relaxed);
+
+            let duracion_ms = inicio_imagen.elapsed().as_millis();
+            supervision_workers.emitir_finalizacion(&app_handle, &nombre, duracion_ms);
+
+            // El `Ok` exterior pertenece al coordinador de vmspect. El
+            // resultado interior conserva el fallo de esta imagen sin
+            // abortar las demás tareas del lote.
+            Ok((indice, ruta, resultado))
+        },
+    )
+    .map_err(|error| format!("Fallo el procesamiento concurrente de vmspect: {error}"))?;
+
     let cancelado = supervision.cancelada();
     supervision.emitir(
         app,
         "generando_reporte",
-        "Consolidando la base de datos JSON...".to_string(),
+        "Transformando los InspectionReport de vmspect en la base JSON...".to_string(),
     );
 
-    let mut pares = informes.into_inner().unwrap_or_default();
+    let mut pares: Vec<(usize, RegistroVM)> = Vec::with_capacity(resultados.len());
+    for (indice, ruta, resultado) in resultados {
+        let registro =
+            construir_registro_vm(&ruta, resultado, generar_discrepancias, config, &reglas);
+
+        if registro.exitosa {
+            if registro.observaciones.is_empty() {
+                supervision.exitosas.fetch_add(1, Ordering::Relaxed);
+                supervision.registrar_log(
+                    "exito",
+                    &registro.nombre_vm,
+                    format!(
+                        "Inspección vmspect completa: {} programas indexados.",
+                        registro.programas.len()
+                    ),
+                );
+            } else {
+                supervision
+                    .con_observaciones
+                    .fetch_add(1, Ordering::Relaxed);
+                supervision.registrar_log(
+                    "advertencia",
+                    &registro.nombre_vm,
+                    registro.observaciones.join(" | "),
+                );
+            }
+        } else {
+            supervision.fallidas.fetch_add(1, Ordering::Relaxed);
+            supervision.registrar_log(
+                "error",
+                &registro.nombre_vm,
+                registro.observaciones.join(" | "),
+            );
+        }
+        if registro.discrepante {
+            supervision.discrepantes.fetch_add(1, Ordering::Relaxed);
+        }
+        pares.push((indice, registro));
+    }
     pares.sort_by_key(|(indice, _)| *indice);
     let registros: Vec<RegistroVM> = pares.into_iter().map(|(_, registro)| registro).collect();
 
@@ -690,16 +595,17 @@ pub fn ejecutar_relevamiento(
         format!("Base de datos guardada en {}.", ruta_bd.display()),
     );
 
-    // --- Fase 5: cierre --------------------------------------------------------
     let fase = if cancelado { "cancelado" } else { "finalizado" };
+    let procesadas = supervision.procesadas.load(Ordering::Relaxed);
     let mensaje_final = if cancelado {
         format!(
-            "Relevamiento cancelado. Se preservaron {} de {} VMs procesadas.",
-            supervision.procesadas.load(Ordering::Relaxed),
-            total_vms
+            "Relevamiento cancelado. Se preservaron {} de {} imágenes procesadas.",
+            procesadas, total_vms
         )
     } else {
-        format!("Relevamiento completo: {total_vms} VMs, {total_programas} programas indexados.")
+        format!(
+            "Relevamiento completo: {total_vms} imágenes, {total_programas} programas indexados."
+        )
     };
     supervision.emitir(app, fase, mensaje_final);
 
@@ -718,173 +624,130 @@ pub fn ejecutar_relevamiento(
     })
 }
 
-// ============================================================================
-// INSPECCIÓN DE UNA VM (uno o varios discos en la misma carpeta)
-// ============================================================================
-
-struct ContextoInspeccion<'a> {
-    supervision: &'a Supervision,
-    app: &'a AppHandle,
-    opciones: &'a Options,
-    generar_discrepancias: bool,
-    config: &'a ConfiguracionApp,
-    reglas: &'a ReglasClasificacion,
-}
-
-fn inspeccionar_vm(
-    contexto: &ContextoInspeccion<'_>,
-    indice: usize,
-    nombre: &str,
-    carpeta: &Path,
-    discos: &[PathBuf],
-) -> RegistroVM {
-    let supervision = contexto.supervision;
-    let app = contexto.app;
-    let opciones = contexto.opciones;
-    let generar_discrepancias = contexto.generar_discrepancias;
-    let config = contexto.config;
-    let reglas = contexto.reglas;
-    let mut observaciones: Vec<String> = Vec::new();
-    let mut informe: Option<vmspect::InspectionReport> = None;
-    let peso_bytes: u64 = discos
-        .iter()
-        .filter_map(|d| std::fs::metadata(d).ok().map(|m| m.len()))
-        .sum();
-
-    // No intentes montar formatos NBD si el backend requerido no está disponible.
-    let nbd_disponible = vmspect_backend::resolver_qemu_nbd(opciones.qemu_nbd.as_deref()).is_ok();
-    if opciones.force_nbd && !nbd_disponible {
-        observaciones.push(
-            "Backend QEMU NBD forzado pero qemu-nbd no está disponible; se omitió el montaje NBD."
-                .to_string(),
+impl Supervision {
+    fn emitir_finalizacion(&self, app: &AppHandle, nombre: &str, duracion_ms: u128) {
+        self.emitir(
+            app,
+            "analizando_v_ms",
+            format!(
+                "Finalizada «{nombre}» ({}/{}; {duracion_ms} ms).",
+                self.procesadas.load(Ordering::Relaxed),
+                self.total_vms
+            ),
         );
     }
-
-    // Inspecciona los discos de mayor a menor hasta hallar el disco del SO.
-    'discos: for disco in discos {
-        if supervision.cancelada() {
-            break;
-        }
-        if opciones.force_nbd && !nbd_disponible {
-            continue 'discos;
-        }
-        match vmspect_backend::verificar_integridad(disco) {
-            Ok(true) => {}
-            Ok(false) => {
-                observaciones.push(format!(
-                    "Imagen con cabecera no reconocida (omitida): {}",
-                    disco.display()
-                ));
-                continue;
-            }
-            Err(e) => {
-                observaciones.push(format!("No se pudo verificar {}: {e}", disco.display()));
-                continue;
-            }
-        }
-
-        if supervision.cancelada() {
-            break 'discos;
-        }
-
-        let resultado = vmspect_backend::inspeccionar(disco, opciones.clone(), |ev| {
-            if supervision.cancelada() {
-                return;
-            }
-            supervision.actualizar_activa(
-                indice,
-                nombre,
-                &ev.stage,
-                ev.percentage,
-                ev.detail.clone(),
-            );
-            supervision.emitir(app, "analizando_v_ms", format!("Inspeccionando «{nombre}»"));
-        });
-
-        match resultado {
-            Ok(reporte) => {
-                let tiene_so = reporte.operating_system != vmspect::OperatingSystem::Unknown;
-                observaciones.extend(reporte.warnings.iter().cloned());
-                if informe.is_none() || tiene_so {
-                    informe = Some(reporte);
-                }
-                if tiene_so {
-                    break 'discos;
-                }
-            }
-            Err(VmSpectError::Cancelled) => break 'discos,
-            Err(e) => {
-                observaciones.push(format!("Fallo la inspección de {}: {e}", disco.display()))
-            }
-        }
-    }
-
-    // Discrepancias de nomenclatura: carpeta vs displayName (.vmx) / Machine name (.vbox).
-    let nombre_interno = detectar_nombre_interno(carpeta);
-    let mut discrepante = false;
-    if generar_discrepancias {
-        if let Some(interno) = &nombre_interno {
-            if normalizar_nombre(interno) != normalizar_nombre(nombre) {
-                discrepante = true;
-                observaciones.push(format!(
-                    "Discrepancia de nomenclatura: la carpeta es «{nombre}» pero la VM se llama «{interno}»."
-                ));
-            }
-        }
-    }
-
-    let cat_posesion = deducir_tipo_posesion(carpeta);
-
-    match informe {
-        Some(reporte) => RegistroVM {
-            exitosa: true,
-            nombre_vm: nombre.to_string(),
-            nombre_interno,
-            ruta_carpeta: carpeta.display().to_string(),
-            propietario: None,
-            tipo_posesion: cat_posesion.clone(),
-            elemento_asignado: None,
-            origen_categoria: cat_posesion,
-            asignado: None,
-            elemento: None,
-            sistema_operativo: reporte.guest_info.formatted_os_string(),
-            hipervisor: Some(reporte.image.hypervisor.name().to_string()),
-            peso_gb: peso_bytes as f64 / GIB,
-            discrepante,
-            observaciones,
-            fecha_relevamiento: fecha_iso(),
-            programas: clasificar_programas(&reporte.installed_programs, reglas, config.modo_dump),
-            peso_bytes,
-        },
-        None => RegistroVM {
-            exitosa: false,
-            nombre_vm: nombre.to_string(),
-            nombre_interno,
-            ruta_carpeta: carpeta.display().to_string(),
-            propietario: None,
-            tipo_posesion: cat_posesion.clone(),
-            elemento_asignado: None,
-            origen_categoria: cat_posesion,
-            asignado: None,
-            elemento: None,
-            sistema_operativo: "No identificado".to_string(),
-            hipervisor: None,
-            peso_gb: peso_bytes as f64 / GIB,
-            discrepante,
-            observaciones: if observaciones.is_empty() {
-                vec!["No se obtuvo ningún informe de los discos disponibles.".to_string()]
-            } else {
-                observaciones
-            },
-            fecha_relevamiento: fecha_iso(),
-            programas: Vec::new(),
-            peso_bytes,
-        },
-    }
 }
 
 // ============================================================================
-// Utilidades de nomenclatura y deducción
+// ADAPTACIÓN DE INFORMES vmspect AL INVENTARIO DE LA APP
+// ============================================================================
+
+fn construir_registro_vm(
+    ruta: &Path,
+    resultado: ResultadoImagen,
+    generar_discrepancias: bool,
+    config: &ConfiguracionApp,
+    reglas: &ReglasClasificacion,
+) -> RegistroVM {
+    let carpeta = ruta
+        .parent()
+        .filter(|padre| !padre.as_os_str().is_empty())
+        .unwrap_or(ruta);
+    let nombre_vm = nombre_vm_desde_ruta(ruta);
+    let nombre_interno = detectar_nombre_interno(carpeta);
+    let cat_posesion = deducir_tipo_posesion(carpeta);
+    let mut observaciones = Vec::new();
+    let discrepante = if generar_discrepancias {
+        nombre_interno
+            .as_deref()
+            .map(|interno| normalizar_nombre(interno) != normalizar_nombre(&nombre_vm))
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
+    if discrepante {
+        if let Some(interno) = nombre_interno.as_deref() {
+            observaciones.push(format!(
+                "Discrepancia de nomenclatura: la carpeta es «{nombre_vm}» pero la VM se llama «{interno}»."
+            ));
+        }
+    }
+
+    let peso_archivo = std::fs::metadata(ruta).map(|m| m.len()).unwrap_or(0);
+    let ruta_carpeta = carpeta.display().to_string();
+
+    match resultado {
+        Ok(reporte) => {
+            observaciones.extend(reporte.warnings);
+            let programas =
+                clasificar_programas(&reporte.installed_programs, reglas, config.modo_dump);
+            let peso_bytes = reporte.image.actual_size.max(peso_archivo);
+            RegistroVM {
+                exitosa: true,
+                nombre_vm,
+                nombre_interno,
+                ruta_carpeta,
+                propietario: None,
+                tipo_posesion: cat_posesion.clone(),
+                elemento_asignado: None,
+                origen_categoria: cat_posesion,
+                asignado: None,
+                elemento: None,
+                sistema_operativo: reporte.guest_info.formatted_os_string(),
+                hipervisor: Some(reporte.image.hypervisor.name().to_string()),
+                peso_gb: peso_bytes as f64 / GIB,
+                discrepante,
+                observaciones,
+                fecha_relevamiento: fecha_iso(),
+                programas,
+                peso_bytes,
+            }
+        }
+        Err(error) => {
+            let detalle = match error {
+                VmSpectError::Cancelled => "Inspección cancelada por el usuario.".to_string(),
+                otro => format!("Fallo la inspección de {}: {otro}", ruta.display()),
+            };
+            observaciones.push(detalle);
+            RegistroVM {
+                exitosa: false,
+                nombre_vm,
+                nombre_interno,
+                ruta_carpeta,
+                propietario: None,
+                tipo_posesion: cat_posesion.clone(),
+                elemento_asignado: None,
+                origen_categoria: cat_posesion,
+                asignado: None,
+                elemento: None,
+                sistema_operativo: "No identificado".to_string(),
+                hipervisor: None,
+                peso_gb: peso_archivo as f64 / GIB,
+                discrepante,
+                observaciones,
+                fecha_relevamiento: fecha_iso(),
+                programas: Vec::new(),
+                peso_bytes: peso_archivo,
+            }
+        }
+    }
+}
+
+fn nombre_vm_desde_ruta(ruta: &Path) -> String {
+    ruta.parent()
+        .and_then(|padre| padre.file_name())
+        .map(|nombre| nombre.to_string_lossy().to_string())
+        .filter(|nombre| !nombre.is_empty())
+        .or_else(|| {
+            ruta.file_stem()
+                .map(|nombre| nombre.to_string_lossy().to_string())
+        })
+        .unwrap_or_else(|| ruta.display().to_string())
+}
+
+// ============================================================================
+// METADATOS AUXILIARES DE LA APLICACIÓN
 // ============================================================================
 
 /// Extrae el nombre interno de la VM desde el descriptor `.vmx`

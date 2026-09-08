@@ -2,7 +2,7 @@
 
 > **Auditoría, relevamiento masivo e inspección estática forense de máquinas virtuales.**
 
-[![Release](https://img.shields.io/badge/Release-v2.2.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v2.2.0)
+[![Release](https://img.shields.io/badge/Release-v2.3.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v2.3.0)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.77+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0+-646CFF.svg?logo=vite)](https://vitejs.dev/)
@@ -282,6 +282,13 @@ Gracias a la integración con el motor `vmspect` y `qemu-nbd`:
 ---
 
 ## 📝 Changelog
+
+### [v2.3.0] - 2026-09-08 (Descubrimiento y concurrencia con vmspect)
+- **Descubrimiento delegado a `vmspect`:** Se utiliza `vmspect::list_vms` para recorrer recursivamente las imágenes y filtrar extents secundarios sin mantener un segundo walker en la aplicación.
+- **Procesamiento concurrente centralizado:** `vmspect::ConcurrentProcessor` y `InspectionEngine` gestionan la cola de inspecciones, los límites de workers y la cancelación compartida.
+- **Telemetría integrada:** El progreso de cada inspección, los tiempos y los fallos por imagen se traducen al contrato de supervisión existente sin descartar el resto del lote.
+- **Adaptación de informes:** Los `InspectionReport` se convierten al inventario JSON existente, conservando exclusiones, clasificación, discrepancias y metadatos de la aplicación.
+- **Validación:** TypeScript, contratos frontend/backend y formato Rust verificados antes del empaquetado.
 
 ### [v2.2.0] - 2026-09-08 (TypeScript Frontend & Backend Contracts)
 - **Migración del frontend a TypeScript:** Se reemplaza el conjunto de módulos JavaScript por una entrada tipada y módulos de estado, UI, tema y contratos IPC.

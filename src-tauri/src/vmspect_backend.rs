@@ -57,16 +57,6 @@ where
     InspectionEngine::new(opciones).inspect_with_progress(ruta, progreso)
 }
 
-/// Comprueba si una imagen tiene una cabecera reconocible para `vmspect`.
-pub fn verificar_integridad(ruta: &Path) -> Result<bool, VmSpectError> {
-    vmspect::verify_image_integrity(ruta)
-}
-
-/// Identifica extensiones y descriptores de imágenes soportados por `vmspect`.
-pub fn es_imagen_vm(ruta: &Path) -> bool {
-    vmspect::is_vm_image(ruta)
-}
-
 /// Resuelve el ejecutable `qemu-nbd` priorizando una ruta explícita, la variable
 /// `QEMU_NBD` y la resolución nativa del motor.
 pub fn resolver_qemu_nbd(explicita: Option<&Path>) -> Result<PathBuf, String> {
