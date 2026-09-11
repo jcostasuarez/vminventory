@@ -36,13 +36,13 @@ export function escapeHtml(value: unknown): string {
   })[character] ?? character);
 }
 
-export function deducirEntidadDesdeArchivo(fileName: unknown): string | null {
-  if (!fileName) return null;
-  const file = String(fileName).split(/[\\/]/).pop() || '';
+
+/** Deriva el responsable a partir del nombre base del reporte JSON. */
+export function deducirResponsableDesdeArchivo(fileName: unknown): string | null {
+  if (fileName === null || fileName === undefined) return null;
+  const file = String(fileName).split(/[\\/]/).pop()?.trim() || '';
   const stem = file.replace(/\.json$/i, '').trim();
-  const genericNames = ['reporte', 'informe', 'vms', 'inventario'];
-  if (!stem || genericNames.includes(stem.toLowerCase())) return null;
-  return stem.replace(/_/g, ' ').trim() || null;
+  return stem ? stem.replace(/_/g, ' ').trim() || null : null;
 }
 
 export function extraerInfoDisco(path: unknown = ''): { disco: string; ubicacion: string } {
@@ -81,7 +81,17 @@ export function formatearBytes(value: unknown): string {
 
 interface UIManagerOptions {
   documentRef?: DocumentLike | null;
-  onAbrirCarpeta?: (path: string) => void;
+}
+
+export function agruparCoincidenciasPorTipo(items: CoincidenciaSoftware[]): Array<[string, CoincidenciaSoftware[]]> {
+  const grupos = new Map<string, CoincidenciaSoftware[]>();
+  for (const item of items) {
+    const tipo = sanitizarTexto(item.tipo) || 'Sin tipo';
+    const grupo = grupos.get(tipo) ?? [];
+    grupo.push(item);
+    grupos.set(tipo, grupo);
+  }
+  return [...grupos.entries()].sort(([a], [b]) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
 }
 
 /**
@@ -90,15 +100,17 @@ interface UIManagerOptions {
  */
 export class UIManager {
   private readonly document: DocumentLike | null | undefined;
-  public onAbrirCarpeta: (path: string) => void;
   public ultimoResultado: ResultadoConsultaSoftware | null = null;
   private readonly themeManager: ThemeManager;
   public herramientaActiva: ToolName = 'consultor';
   private ultimoInformeReporte: InformeDirecto | null = null;
   private filtroTextoReporte = '';
   private filtroCategoriaReporte = 'todas';
+  private readonly sugerencias = new Map<DomElementLike, string[]>();
+  private readonly desplegables: Array<[DomElementLike, DomElementLike]> = [];
   private habilitarBitacora = false;
   private mostrarProgresoIndividual = false;
+  private modalTrigger: DomElementLike | null = null;
 
   public customTitlebar: DomElementLike | null = null;
   public btnToggleTheme: DomElementLike | null = null;
@@ -195,41 +207,49 @@ export class UIManager {
   public cfgGenerarDiscrepancias: DomElementLike | null = null;
   public cfgHabilitarBitacora: DomElementLike | null = null;
   public cfgMostrarProgresoIndividual: DomElementLike | null = null;
-  public cfgNombreArchivo: DomElementLike | null = null;
+  public btnRestablecerConfigAnalizador: DomElementLike | null = null;
 
   public inputBuscarPrograma: DomElementLike | null = null;
   public inputBuscarVm: DomElementLike | null = null;
   public inputBuscarVersion: DomElementLike | null = null;
   public selectBuscarTipo: DomElementLike | null = null;
-  public inputBuscarPropietario: DomElementLike | null = null;
+  public inputBuscarResponsable: DomElementLike | null = null;
   public btnLimpiarPrograma: DomElementLike | null = null;
   public btnLimpiarVm: DomElementLike | null = null;
+  public btnLimpiarVersion: DomElementLike | null = null;
+  public btnLimpiarResponsable: DomElementLike | null = null;
   public btnLimpiarFiltros: DomElementLike | null = null;
+  public suggestionsProgramas: DomElementLike | null = null;
+  public suggestionsVms: DomElementLike | null = null;
+  public suggestionsVersiones: DomElementLike | null = null;
+  public suggestionsResponsables: DomElementLike | null = null;
   public btnEjecutarBusquedaSoftware: DomElementLike | null = null;
   public btnRecargarSoftware: DomElementLike | null = null;
-  public datalistProgramas: DomElementLike | null = null;
-  public datalistVms: DomElementLike | null = null;
-  public datalistVersiones: DomElementLike | null = null;
-  public datalistPropietarios: DomElementLike | null = null;
+
   public lblSoftwareMetricas: DomElementLike | null = null;
   public consultorCardsWrapper: DomElementLike | null = null;
   public consultorEmptyState: DomElementLike | null = null;
+  public consultorMoreFilters: DomElementLike | null = null;
+  public consultorActiveFilters: DomElementLike | null = null;
+  public consultorLoadingIndicator: DomElementLike | null = null;
+  public consultorDatasourceBar: DomElementLike | null = null;
+  public lblConsultorFuenteDatos: DomElementLike | null = null;
+  public btnConsultorCambiarFuente: DomElementLike | null = null;
 
   public modalConfigConsultor: DomElementLike | null = null;
   public btnCloseConfigConsultor: DomElementLike | null = null;
   public btnCancelarConfigConsultor: DomElementLike | null = null;
   public btnGuardarConfigConsultor: DomElementLike | null = null;
   public cfgRutaBdJson: DomElementLike | null = null;
+  public cfgLimiteCoincidencias: DomElementLike | null = null;
   public btnExaminarBdJson: DomElementLike | null = null;
 
   constructor({
     documentRef = typeof document !== 'undefined'
       ? (document as unknown as DocumentLike)
-      : null,
-    onAbrirCarpeta = () => {}
+      : null
   }: UIManagerOptions = {}) {
     this.document = documentRef;
-    this.onAbrirCarpeta = onAbrirCarpeta;
     this.initElements();
     this.themeManager = new ThemeManager(this.btnToggleTheme);
     this.bindEvents();
@@ -320,25 +340,35 @@ export class UIManager {
     this.inputBuscarVm = get('inputBuscarVm');
     this.inputBuscarVersion = get('inputBuscarVersion');
     this.selectBuscarTipo = get('selectBuscarTipo');
-    this.inputBuscarPropietario = get('inputBuscarPropietario');
+    this.inputBuscarResponsable = get('inputBuscarResponsable');
     this.btnLimpiarPrograma = get('btnLimpiarPrograma');
     this.btnLimpiarVm = get('btnLimpiarVm');
+    this.btnLimpiarVersion = get('btnLimpiarVersion');
+    this.btnLimpiarResponsable = get('btnLimpiarResponsable');
     this.btnLimpiarFiltros = get('btnLimpiarFiltros');
+    this.suggestionsProgramas = get('suggestionsProgramas');
+    this.suggestionsVms = get('suggestionsVms');
+    this.suggestionsVersiones = get('suggestionsVersiones');
+    this.suggestionsResponsables = get('suggestionsResponsables');
     this.btnEjecutarBusquedaSoftware = get('btnEjecutarBusquedaSoftware');
     this.btnRecargarSoftware = get('btnRecargarSoftware');
-    this.datalistProgramas = get('datalistProgramas');
-    this.datalistVms = get('datalistVms');
-    this.datalistVersiones = get('datalistVersiones');
-    this.datalistPropietarios = get('datalistPropietarios');
+
     this.lblSoftwareMetricas = get('lblSoftwareMetricas');
     this.consultorCardsWrapper = get('consultorCardsWrapper');
     this.consultorEmptyState = get('consultorEmptyState');
+    this.consultorMoreFilters = get('consultorMoreFilters');
+    this.consultorActiveFilters = get('consultorActiveFilters');
+    this.consultorLoadingIndicator = get('consultorLoadingIndicator');
+    this.consultorDatasourceBar = get('consultorDatasourceBar');
+    this.lblConsultorFuenteDatos = get('lblConsultorFuenteDatos');
+    this.btnConsultorCambiarFuente = get('btnConsultorCambiarFuente');
 
     this.modalConfigConsultor = get('modalConfigConsultor');
     this.btnCloseConfigConsultor = get('btnCloseConfigConsultor');
     this.btnCancelarConfigConsultor = get('btnCancelarConfigConsultor');
     this.btnGuardarConfigConsultor = get('btnGuardarConfigConsultor');
     this.cfgRutaBdJson = get('cfgRutaBdJson');
+    this.cfgLimiteCoincidencias = get('cfgLimiteCoincidencias');
     this.btnExaminarBdJson = get('btnExaminarBdJson');
 
     this.modalConfigAnalizador = get('modalConfigAnalizador');
@@ -357,19 +387,31 @@ export class UIManager {
     this.cfgGenerarDiscrepancias = get('cfgGenerarDiscrepancias');
     this.cfgHabilitarBitacora = get('cfgHabilitarBitacora');
     this.cfgMostrarProgresoIndividual = get('cfgMostrarProgresoIndividual');
-    this.cfgNombreArchivo = get('cfgNombreArchivo');
+    this.btnRestablecerConfigAnalizador = get('btnRestablecerConfigAnalizador');
   }
 
   private bindEvents(): void {
-    this.tabBtnAnalizador?.addEventListener('click', () => this.seleccionarPestana('analizador'));
-    this.tabBtnConsultor?.addEventListener('click', () => this.seleccionarPestana('consultor'));
-    this.tabBtnReporte?.addEventListener('click', () => this.seleccionarPestana('reporte'));
-
-    this.consultorCardsWrapper?.addEventListener('click', (event) => {
-      const button = event.target?.closest?.('.btn-abrir-ubicacion-vm');
-      const path = button?.getAttribute('data-ruta');
-      if (path) this.onAbrirCarpeta(path);
+    const tabs: Array<{ button: DomElementLike | null; tool: ToolName }> = [
+      { button: this.tabBtnAnalizador, tool: 'analizador' },
+      { button: this.tabBtnConsultor, tool: 'consultor' },
+      { button: this.tabBtnReporte, tool: 'reporte' }
+    ];
+    tabs.forEach(({ button, tool }, index) => {
+      button?.addEventListener('click', () => this.seleccionarPestana(tool));
+      button?.addEventListener('keydown', (event) => {
+        if (!['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'].includes(event.key || '')) return;
+        event.preventDefault?.();
+        const nextIndex = event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? tabs.length - 1
+            : (index + (event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1) + tabs.length) % tabs.length;
+        const next = tabs[nextIndex];
+        this.seleccionarPestana(next.tool);
+        next.button?.focus?.();
+      });
     });
+
 
     this.inputFiltrarSoftwareReporte?.addEventListener('input', () => this.renderTablaReporte());
     this.selectCategoriaSoftwareReporte?.addEventListener('change', () => this.renderTablaReporte());
@@ -378,7 +420,67 @@ export class UIManager {
       modal?.addEventListener('click', (event) => {
         if (event.target === modal) this.cerrarModal(modal);
       });
+      modal?.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault?.();
+          this.cerrarModal(modal);
+        }
+      });
     });
+
+    this.btnConsultorCambiarFuente?.addEventListener('click', () => {
+      this.abrirModal(this.modalConfigConsultor, this.btnConsultorCambiarFuente);
+    });
+
+    this.configurarDesplegable(this.inputBuscarPrograma, this.suggestionsProgramas);
+    this.configurarDesplegable(this.inputBuscarVm, this.suggestionsVms);
+    this.configurarDesplegable(this.inputBuscarVersion, this.suggestionsVersiones);
+    this.configurarDesplegable(this.inputBuscarResponsable, this.suggestionsResponsables);
+    this.document?.addEventListener?.('click', (event) => {
+      if (event.target?.closest?.('.consultor-filter-control')) return;
+      this.cerrarDesplegables();
+    });
+    this.document?.addEventListener?.('keydown', (event) => {
+      if (event.key === 'Escape') this.cerrarDesplegables();
+    });
+  }
+
+  private configurarDesplegable(input: DomElementLike | null, menu: DomElementLike | null): void {
+    if (!input || !menu) return;
+    this.desplegables.push([input, menu]);
+    input.addEventListener('focus', () => {
+      this.actualizarDesplegable(input, menu);
+    });
+    input.addEventListener('input', () => {
+      this.actualizarDesplegable(input, menu);
+    });
+    menu.addEventListener('click', (event) => {
+      const option = event.target?.closest?.('[data-consultor-option]');
+      const value = option?.getAttribute('data-consultor-option');
+      if (value === null || value === undefined) return;
+      input.value = value;
+      const dispatch = (input as unknown as { dispatchEvent?: (event: Event) => boolean }).dispatchEvent;
+      dispatch?.call(input, new Event('input', { bubbles: true }));
+      this.cerrarDesplegable(input, menu);
+    });
+  }
+
+  private actualizarDesplegable(input: DomElementLike, menu: DomElementLike): void {
+    const query = input.value.trim().toLocaleLowerCase();
+    const options = (this.sugerencias.get(menu) ?? [])
+      .filter((value) => !query || value.toLocaleLowerCase().includes(query));
+    menu.innerHTML = options.map((value) => `<div class="consultor-suggestion-option" role="option" data-consultor-option="${escapeHtml(value)}">${escapeHtml(value)}</div>`).join('');
+    menu.classList.toggle('is-open', options.length > 0);
+    input.setAttribute('aria-expanded', options.length > 0 ? 'true' : 'false');
+  }
+
+  private cerrarDesplegable(input: DomElementLike, menu: DomElementLike): void {
+    menu.classList.remove('is-open');
+    input.setAttribute('aria-expanded', 'false');
+  }
+
+  private cerrarDesplegables(): void {
+    this.desplegables.forEach(([input, menu]) => this.cerrarDesplegable(input, menu));
   }
 
   aplicarTema(theme: Theme): Theme {
@@ -389,7 +491,10 @@ export class UIManager {
     this.herramientaActiva = tool;
     const buttons = [this.tabBtnAnalizador, this.tabBtnConsultor, this.tabBtnReporte];
     const views = [this.viewAnalizador, this.viewConsultor, this.viewReporte];
-    buttons.forEach((button) => button?.classList.remove('active'));
+    buttons.forEach((button) => {
+      button?.classList.remove('active');
+      button?.setAttribute('aria-selected', 'false');
+    });
     views.forEach((view) => view?.classList.remove('active'));
 
     const selectedButton = tool === 'analizador'
@@ -404,12 +509,13 @@ export class UIManager {
         : this.viewConsultor;
 
     selectedButton?.classList.add('active');
+    selectedButton?.setAttribute('aria-selected', 'true');
     selectedView?.classList.add('active');
     this.btnOpenAjustes?.setAttribute(
       'title',
       tool === 'consultor'
-        ? 'Configurar directorio de reportes JSON'
-        : 'Configurar opciones del motor vmspect'
+        ? 'Configurar la carpeta de inventario del Consultor'
+        : 'Configurar opciones avanzadas del Analizador'
     );
   }
 
@@ -420,10 +526,41 @@ export class UIManager {
 
   sincronizarAjustes(config: Partial<AppConfig> = {}): void {
     if (this.cfgRutaBdJson) this.cfgRutaBdJson.value = config.ruta_bd_json || '';
+    if (this.cfgLimiteCoincidencias) this.cfgLimiteCoincidencias.value = String(config.limite_coincidencias ?? 30);
+    const ruta = config.ruta_bd_json?.trim();
+    if (this.lblConsultorFuenteDatos) {
+      this.lblConsultorFuenteDatos.textContent = ruta || 'Sin configurar';
+      this.lblConsultorFuenteDatos.title = ruta || '';
+    }
+    this.consultorDatasourceBar?.classList.toggle('is-unset', !ruta);
   }
 
   sincronizarConfiguracionAnalizador(config: Partial<AnalyzerConfig> = {}): void {
-    if (this.cfgMaxHilos) this.cfgMaxHilos.value = String(config.max_hilos ?? 4);
+    this.aplicarCamposModalAnalizador(config);
+    if (this.inputNombreArchivoSalida) {
+      this.inputNombreArchivoSalida.value = config.nombre_archivo_salida || 'Relevamiento_VMs.json';
+    }
+    if (this.lblHilosAccion) {
+      this.lblHilosAccion.textContent = `Configuración: ${config.max_hilos || 2} hilos`;
+    }
+    this.habilitarBitacora = Boolean(config.habilitar_bitacora);
+    this.mostrarProgresoIndividual = Boolean(config.mostrar_progreso_individual);
+    if (this.wrapperBitacora) {
+      this.wrapperBitacora.style.display = this.habilitarBitacora ? 'block' : 'none';
+      if (!this.habilitarBitacora) this.wrapperBitacora.removeAttribute('open');
+    }
+    if (this.wrapperVmIndividual) {
+      this.wrapperVmIndividual.style.display = this.mostrarProgresoIndividual ? 'flex' : 'none';
+    }
+  }
+
+  /** Restablece solo los campos del modal, sin tocar el nombre de archivo del panel principal. */
+  restablecerFormularioConfigAnalizador(config: Partial<AnalyzerConfig>): void {
+    this.aplicarCamposModalAnalizador(config);
+  }
+
+  private aplicarCamposModalAnalizador(config: Partial<AnalyzerConfig>): void {
+    if (this.cfgMaxHilos) this.cfgMaxHilos.value = String(config.max_hilos ?? 2);
     if (this.cfgModoDump) this.cfgModoDump.checked = Boolean(config.modo_dump);
     if (this.cfgIncluirSystem) this.cfgIncluirSystem.checked = Boolean(config.incluir_system);
     if (this.cfgForzarQemu) this.cfgForzarQemu.checked = Boolean(config.forzar_qemu);
@@ -437,33 +574,15 @@ export class UIManager {
     if (this.cfgMostrarProgresoIndividual) {
       this.cfgMostrarProgresoIndividual.checked = Boolean(config.mostrar_progreso_individual);
     }
-    if (this.cfgNombreArchivo) {
-      this.cfgNombreArchivo.value = config.nombre_archivo_salida || 'Relevamiento_VMs.json';
-    }
-    if (this.inputNombreArchivoSalida) {
-      this.inputNombreArchivoSalida.value = config.nombre_archivo_salida || 'Relevamiento_VMs.json';
-    }
-    if (this.lblHilosAccion) {
-      this.lblHilosAccion.textContent = `Configuración: ${config.max_hilos || 4} hilos`;
-    }
-    this.habilitarBitacora = Boolean(config.habilitar_bitacora);
-    this.mostrarProgresoIndividual = Boolean(config.mostrar_progreso_individual);
-    if (this.wrapperBitacora) {
-      this.wrapperBitacora.style.display = this.habilitarBitacora ? 'block' : 'none';
-      if (!this.habilitarBitacora) this.wrapperBitacora.removeAttribute('open');
-    }
-    if (this.wrapperVmIndividual) {
-      this.wrapperVmIndividual.style.display = this.mostrarProgresoIndividual ? 'flex' : 'none';
-    }
   }
 
   leerFormularioConfiguracionAnalizador(): AnalyzerConfig {
     const hilos = Number(this.cfgMaxHilos?.value);
     const chunk = Number(this.cfgTamanoChunk?.value);
-    let nombreArchivo = this.cfgNombreArchivo?.value.trim() || 'Relevamiento_VMs.json';
+    let nombreArchivo = this.inputNombreArchivoSalida?.value.trim() || 'Relevamiento_VMs.json';
     if (!nombreArchivo.toLowerCase().endsWith('.json')) nombreArchivo += '.json';
     return {
-      max_hilos: Number.isFinite(hilos) && hilos >= 1 ? Math.min(32, Math.round(hilos)) : 4,
+      max_hilos: Number.isFinite(hilos) && hilos >= 1 ? Math.min(32, Math.round(hilos)) : 2,
       modo_dump: Boolean(this.cfgModoDump?.checked),
       incluir_system: Boolean(this.cfgIncluirSystem?.checked),
       forzar_qemu: Boolean(this.cfgForzarQemu?.checked),
@@ -477,31 +596,48 @@ export class UIManager {
     };
   }
 
-  leerFormularioConfigConsultor(): Pick<AppConfig, 'ruta_bd_json'> {
+  leerFormularioConfigConsultor(): Pick<AppConfig, 'ruta_bd_json' | 'limite_coincidencias'> {
+    const limite = Number(this.cfgLimiteCoincidencias?.value);
     return {
-      ruta_bd_json: this.cfgRutaBdJson?.value.trim() || ''
+      ruta_bd_json: this.cfgRutaBdJson?.value.trim() || '',
+      limite_coincidencias: Number.isFinite(limite) ? Math.min(100, Math.max(10, Math.round(limite))) : 30
     };
   }
 
-  abrirModal(modal: DomElementLike | null = this.modalConfigConsultor): void {
+  abrirModal(modal: DomElementLike | null = this.modalConfigConsultor, trigger: DomElementLike | null = null): void {
     if (!modal) return;
+    this.modalTrigger = trigger;
     modal.classList.add('open');
     modal.setAttribute('aria-hidden', 'false');
+    this.enfocarPrimerCampoModal(modal);
+  }
+
+  private enfocarPrimerCampoModal(modal: DomElementLike): void {
+    if (modal === this.modalConfigConsultor) {
+      this.cfgRutaBdJson?.focus?.();
+    } else if (modal === this.modalConfigAnalizador) {
+      this.cfgMaxHilos?.focus?.();
+    }
   }
 
   cerrarModal(modal: DomElementLike | null = this.modalConfigConsultor): void {
     if (!modal) return;
     modal.classList.remove('open');
     modal.setAttribute('aria-hidden', 'true');
+    this.modalTrigger?.focus?.();
+    this.modalTrigger = null;
   }
 
   actualizarBotonesLimpieza(): void {
-    if (this.btnLimpiarPrograma) {
-      this.btnLimpiarPrograma.style.display = this.inputBuscarPrograma?.value ? 'block' : 'none';
-    }
-    if (this.btnLimpiarVm) {
-      this.btnLimpiarVm.style.display = this.inputBuscarVm?.value ? 'block' : 'none';
-    }
+    const buttons: Array<[DomElementLike | null, DomElementLike | null]> = [
+      [this.btnLimpiarPrograma, this.inputBuscarPrograma],
+      [this.btnLimpiarVm, this.inputBuscarVm],
+      [this.btnLimpiarVersion, this.inputBuscarVersion],
+      [this.btnLimpiarResponsable, this.inputBuscarResponsable]
+    ];
+    buttons.forEach(([button, input]) => {
+      if (button) button.style.display = input?.value ? 'inline-flex' : 'none';
+    });
   }
 
   limpiarFiltros(): void {
@@ -509,41 +645,50 @@ export class UIManager {
     if (this.inputBuscarVm) this.inputBuscarVm.value = '';
     if (this.inputBuscarVersion) this.inputBuscarVersion.value = '';
     if (this.selectBuscarTipo) this.selectBuscarTipo.value = 'todos';
-    if (this.inputBuscarPropietario) this.inputBuscarPropietario.value = '';
+    if (this.inputBuscarResponsable) this.inputBuscarResponsable.value = '';
     this.actualizarBotonesLimpieza();
+    this.consultorMoreFilters?.removeAttribute('open');
+    this.actualizarFiltrosActivos({});
   }
 
   poblarSugerenciasSoftware(
     programas: unknown[] = [],
     vms: unknown[] = [],
     versiones: unknown[] = [],
-    propietarios: unknown[] = [],
-    asignados: unknown[] = [],
-    elementos: unknown[] = []
+    responsables: unknown[] = []
   ): void {
-    this.poblarDatalist(this.datalistProgramas, programas);
-    this.poblarDatalist(this.datalistVms, vms);
-    this.poblarDatalist(this.datalistVersiones, versiones, 100);
-    this.poblarDatalist(this.datalistPropietarios, [
-      ...propietarios,
-      ...asignados,
-      ...elementos
-    ], 100);
+    this.poblarDesplegable(this.suggestionsProgramas, programas);
+    this.poblarDesplegable(this.suggestionsVms, vms);
+    this.poblarDesplegable(this.suggestionsVersiones, versiones, 100);
+    this.poblarDesplegable(this.suggestionsResponsables, responsables, 100);
   }
 
-  private poblarDatalist(container: DomElementLike | null, values: unknown[], limit = MAX_SUGGESTIONS): void {
+  poblarTipos(tipos: unknown[] = []): void {
+    if (!this.selectBuscarTipo) return;
+    const seleccionado = this.selectBuscarTipo.value;
+    const opciones = uniqueValues(tipos).sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+    this.selectBuscarTipo.innerHTML = [
+      '<option value="todos">Todos</option>',
+      ...opciones.map((tipo) => `<option value="${escapeHtml(tipo)}">${escapeHtml(tipo)}</option>`)
+    ].join('');
+    this.selectBuscarTipo.value = opciones.includes(seleccionado) ? seleccionado : 'todos';
+  }
+
+  private poblarDesplegable(container: DomElementLike | null, values: unknown[], limit = MAX_SUGGESTIONS): void {
     if (!container) return;
-    container.innerHTML = uniqueValues(values, limit)
-      .map((value) => `<option value="${escapeHtml(value)}"></option>`)
+    const normalized = uniqueValues(values, limit);
+    this.sugerencias.set(container, normalized);
+    container.innerHTML = normalized
+      .map((value) => `<div class="consultor-suggestion-option" role="option" data-consultor-option="${escapeHtml(value)}">${escapeHtml(value)}</div>`)
       .join('');
   }
 
   renderResultadosSoftware(
     resultado: ResultadoConsultaSoftware | null,
-    filtros: Partial<SearchFilters> = {},
-    onAbrirUbicacion: (path: string) => void = this.onAbrirCarpeta
+    filtros: Partial<SearchFilters> = {}
   ): void {
     this.ultimoResultado = resultado;
+    this.actualizarFiltrosActivos(filtros);
     const coincidencias = Array.isArray(resultado?.coincidencias) ? resultado.coincidencias : [];
     const hayBase = Boolean(
       coincidencias.length ||
@@ -554,17 +699,17 @@ export class UIManager {
       filtros.programa?.trim() ||
       filtros.vm?.trim() ||
       filtros.version?.trim() ||
-      filtros.propietario?.trim() ||
+      filtros.responsable?.trim() ||
       (filtros.tipo && filtros.tipo !== 'todos')
     );
 
     if (!hayBase) {
       this.limpiarResultados();
       this.mostrarEstado(
-        'No se encontraron reportes JSON.',
-        'Configura el directorio de reportes desde Ajustes para comenzar a consultar.'
+        'No se encontraron reportes JSON en la carpeta de inventario.',
+        'Configura la carpeta de inventario desde Configuración para comenzar a consultar.'
       );
-      this.actualizarMetricas('Sin reportes JSON encontrados. Configura la base de datos en Ajustes.');
+      this.actualizarMetricas('Sin reportes JSON encontrados. Configura la carpeta de inventario.');
       return;
     }
 
@@ -595,35 +740,59 @@ export class UIManager {
     this.actualizarMetricas(
       `${coincidencias.length} coincidencia(s) en ${vms} máquina(s) virtual(es) • ${formatNumber(resultado?.total_archivos_json)} reportes`
     );
-    this.renderTarjetas(coincidencias, onAbrirUbicacion);
+    this.renderTarjetas(coincidencias);
   }
 
-  renderTarjetas(
-    items: CoincidenciaSoftware[],
-    onAbrirUbicacion: (path: string) => void = this.onAbrirCarpeta
-  ): void {
+  private actualizarFiltrosActivos(filtros: Partial<SearchFilters> = {}): void {
+    if (this.consultorMoreFilters && (
+      filtros.version?.trim() || filtros.responsable?.trim() || (filtros.tipo && filtros.tipo !== 'todos')
+    )) {
+      this.consultorMoreFilters.setAttribute('open', '');
+    }
+    if (!this.consultorActiveFilters) return;
+    const chips: string[] = [];
+    if (filtros.programa?.trim()) {
+      chips.push(this.crearChipFiltro('programa', 'Programa', filtros.programa.trim()));
+    }
+    if (filtros.vm?.trim()) {
+      chips.push(this.crearChipFiltro('vm', 'Máquina virtual', filtros.vm.trim()));
+    }
+    if (filtros.version?.trim()) {
+      chips.push(this.crearChipFiltro('version', 'Versión', filtros.version.trim()));
+    }
+    if (filtros.tipo && filtros.tipo !== 'todos') {
+      chips.push(this.crearChipFiltro('tipo', 'Tipo', filtros.tipo));
+    }
+    if (filtros.responsable?.trim()) {
+      chips.push(this.crearChipFiltro('responsable', 'Responsable', filtros.responsable.trim()));
+    }
+    this.consultorActiveFilters.innerHTML = chips.join('');
+    this.consultorActiveFilters.style.display = chips.length ? 'flex' : 'none';
+  }
+
+  private crearChipFiltro(field: string, label: string, value: string): string {
+    return `<span class="consultor-filter-chip">${escapeHtml(label)}: ${escapeHtml(value)}<button type="button" class="consultor-filter-chip-clear" data-filter-clear="${field}" aria-label="Quitar filtro ${escapeHtml(label)}: ${escapeHtml(value)}">×</button></span>`;
+  }
+
+  renderTarjetas(items: CoincidenciaSoftware[]): void {
     if (!this.consultorCardsWrapper) return;
-    this.consultorCardsWrapper.innerHTML = items.map((item) => this.crearTarjeta(item)).join('');
-    this.onAbrirCarpeta = onAbrirUbicacion || this.onAbrirCarpeta;
+    this.consultorCardsWrapper.innerHTML = agruparCoincidenciasPorTipo(items)
+      .map(([tipo, coincidencias]) => `
+        <section class="consultor-type-group" aria-label="Tipo ${escapeHtml(tipo)}">
+          <h3 class="consultor-type-heading">${escapeHtml(tipo)} <span>${coincidencias.length}</span></h3>
+          <div class="consultor-type-cards">${coincidencias.map((item) => this.crearTarjeta(item)).join('')}</div>
+        </section>
+      `)
+      .join('');
     this.consultorCardsWrapper.style.display = 'flex';
   }
 
   crearTarjeta(item: CoincidenciaSoftware = {}): string {
     const { disco, ubicacion } = extraerInfoDisco(item.ruta_carpeta);
-    const type = String(item.origen_categoria || item.tipo_posesion || 'Personas').toLowerCase();
-    const isDisk = type.includes('disco');
-    const isServer = type.includes('servidor') || type.includes('server');
-    const badgeClass = isDisk ? 'badge-disco' : isServer ? 'badge-servidor' : 'badge-persona';
-    const typeName = isDisk ? 'Disco' : isServer ? 'Servidor' : 'Persona';
-    const assigned = (
-      (isDisk || isServer ? item.elemento || item.elemento_asignado : item.asignado || item.propietario) ||
-      item.elemento_asignado ||
-      item.propietario ||
-      item.asignado ||
-      item.elemento ||
-      deducirEntidadDesdeArchivo(item.archivo_json) ||
-      'Desconocido'
-    );
+    const tipo = sanitizarTexto(item.tipo) || 'Sin tipo';
+    const responsable = sanitizarTexto(item.responsable)
+      || deducirResponsableDesdeArchivo(item.archivo_json)
+      || 'Sin responsable';
     const tags = Array.isArray(item.tags)
       ? item.tags.map((tag) => `<span class="consultor-tag-pill">#${escapeHtml(tag)}</span>`).join('')
       : '';
@@ -639,10 +808,6 @@ export class UIManager {
     const internalName = item.nombre_interno && item.nombre_interno !== item.nombre_vm
       ? ` <span class="consultor-editor-tag">(${escapeHtml(item.nombre_interno)})</span>`
       : '';
-    const path = escapeHtml(item.ruta_carpeta || '');
-    const openButton = item.ruta_carpeta
-      ? `<button class="step-btn btn-abrir-ubicacion-vm" type="button" data-ruta="${path}">Abrir carpeta</button>`
-      : '';
 
     return `
       <article class="consultor-card">
@@ -651,9 +816,8 @@ export class UIManager {
             <strong>${escapeHtml(item.nombre_programa || 'Programa sin nombre')}</strong>
             ${version}${category}${editor}
           </div>
-          <span class="consultor-possession-badge ${badgeClass}">
-            <strong>${typeName}:</strong> ${escapeHtml(assigned)}
-          </span>
+          <span class="consultor-type-badge" title="Tipo de inventario">${escapeHtml(tipo)}</span>
+          <span class="consultor-responsable-badge"><strong>Responsable:</strong> ${escapeHtml(responsable)}</span>
         </div>
         ${tags ? `<div class="consultor-tags-row"><div class="consultor-tags-wrapper">${tags}</div></div>` : ''}
         <div class="consultor-card-body">
@@ -671,7 +835,6 @@ export class UIManager {
               <span>• ${escapeHtml(item.fecha_relevamiento || 'Fecha desconocida')}</span>
             </div>
           </div>
-          ${openButton}
         </div>
       </article>
     `;
@@ -702,13 +865,20 @@ export class UIManager {
 
   mostrarError(error: unknown): void {
     this.limpiarResultados();
-    this.mostrarEstado('No se pudo completar la consulta.', String(error));
+    this.mostrarEstado(
+      'No se pudo completar la consulta.',
+      `${String(error)} Revisa la carpeta de inventario configurada e intenta nuevamente con «Recargar reportes».`
+    );
     this.actualizarMetricas(`Error al consultar los reportes: ${error}`);
   }
 
   setRecargando(active: boolean): void {
     this.btnRecargarSoftware?.classList.toggle('spinning', active);
+    this.consultorDatasourceBar?.setAttribute('aria-busy', active ? 'true' : 'false');
     if (this.btnEjecutarBusquedaSoftware) this.btnEjecutarBusquedaSoftware.disabled = active;
+    if (this.consultorLoadingIndicator) {
+      this.consultorLoadingIndicator.style.display = active ? 'inline-flex' : 'none';
+    }
   }
 
   actualizarPasos(rutaOrigen: string, rutaDestino: string, nombreArchivo?: string): void {
@@ -738,18 +908,18 @@ export class UIManager {
       this.btnIniciarAccion.classList.toggle('ready-to-run', listo);
     }
     if (this.lblHilosAccion && !this.btnIniciarAccion?.classList.contains('cancel')) {
-      this.lblHilosAccion.textContent = listo ? 'Iniciar análisis' : 'Pendiente';
+      this.lblHilosAccion.textContent = listo ? 'Iniciar análisis' : 'Selecciona origen y destino';
     }
   }
 
   setEstadoAnalizador(ejecutando: boolean, cancelando = false): void {
-    if (this.lblTitleAccion) this.lblTitleAccion.textContent = ejecutando ? 'Cancelar' : 'Análisis';
+    if (this.lblTitleAccion) this.lblTitleAccion.textContent = ejecutando ? 'Cancelar' : 'Iniciar análisis';
     if (this.lblHilosAccion) {
       this.lblHilosAccion.textContent = cancelando
         ? 'Cancelando...'
         : ejecutando
           ? 'Detener análisis'
-          : 'Iniciar';
+          : 'Iniciar análisis';
     }
     this.btnIniciarAccion?.classList.toggle('cancel', ejecutando);
     if (this.btnIniciarAccion) this.btnIniciarAccion.disabled = cancelando;
@@ -883,7 +1053,7 @@ export class UIManager {
     if (!this.analyzerSummary) return;
     if (this.wrapperBitacora && this.habilitarBitacora) this.wrapperBitacora.setAttribute('open', '');
     this.analyzerSummary.style.display = 'block';
-    this.analyzerSummary.textContent = `No se pudo completar el relevamiento: ${String(error)}`;
+    this.analyzerSummary.textContent = `No se pudo completar el relevamiento: ${String(error)} Revisa el origen, el destino y la configuración avanzada, y vuelve a intentarlo.`;
   }
 
   private etiquetaFase(fase: string): string {
@@ -912,15 +1082,21 @@ export class UIManager {
   }
 
   actualizarProgresoReporte(progreso: ProgresoInspeccion): void {
-    const porcentaje = Math.min(100, Math.max(0, Number(progreso.porcentaje) || 0));
-    if (this.barProgresoReporte) this.barProgresoReporte.style.width = `${porcentaje}%`;
+    const numero = Number(progreso.porcentaje);
+    const porcentaje = Number.isFinite(numero) ? Math.min(100, Math.max(0, numero)) : 0;
+    if (this.barProgresoReporte) {
+      this.barProgresoReporte.style.width = `${porcentaje}%`;
+      this.barProgresoReporte.setAttribute('aria-valuenow', String(porcentaje));
+    }
     if (this.lblPorcentajeReporte) this.lblPorcentajeReporte.textContent = `${porcentaje}%`;
     if (this.lblEtapaReporte) this.lblEtapaReporte.textContent = progreso.etapa || 'Analizando...';
     if (this.lblDetalleReporte) this.lblDetalleReporte.textContent = progreso.detalle || '';
   }
 
-  setEstadoReporte(ejecutando: boolean): void {
-    if (this.wrapperProgresoReporte) this.wrapperProgresoReporte.style.display = ejecutando ? 'flex' : 'none';
+  setEstadoReporte(ejecutando: boolean, conservarProgreso = false): void {
+    if (this.wrapperProgresoReporte) {
+      this.wrapperProgresoReporte.style.display = ejecutando || conservarProgreso ? 'flex' : 'none';
+    }
     if (this.btnIniciarReporte) {
       this.btnIniciarReporte.disabled = ejecutando || !this.lblDiscoReporteRuta?.title;
       this.btnIniciarReporte.classList.toggle('ready-to-run', !ejecutando && Boolean(this.lblDiscoReporteRuta?.title));
@@ -1042,7 +1218,7 @@ export class UIManager {
     if (this.containerResultadosReporte) this.containerResultadosReporte.style.display = 'none';
     if (this.reporteEmptyState) {
       this.reporteEmptyState.style.display = 'flex';
-      this.reporteEmptyState.innerHTML = `<div class="empty-state-title">No se pudo generar el reporte.</div><div class="empty-state-detail">${escapeHtml(error)}</div>`;
+      this.reporteEmptyState.innerHTML = `<div class="empty-state-title">No se pudo generar el reporte.</div><div class="empty-state-detail">${escapeHtml(error)} Verifica que el archivo exista y sea accesible, y vuelve a intentarlo.</div>`;
     }
   }
 }

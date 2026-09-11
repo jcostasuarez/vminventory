@@ -14,20 +14,20 @@
         <span class="titlebar-logo-badge">VM</span>
         <span>VM Inventory</span>
       </div>
-      <nav class="titlebar-tools-tabs" aria-label="Herramientas">
-        <button class="tool-tab-btn active" id="tabBtnAnalizador" type="button" title="Relevamiento recursivo de máquinas virtuales">
+      <nav class="titlebar-tools-tabs" role="tablist" aria-label="Herramientas">
+        <button class="tool-tab-btn active" id="tabBtnAnalizador" type="button" role="tab" aria-selected="true" aria-controls="viewAnalizador" title="Relevamiento recursivo de máquinas virtuales">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <polygon points="5 3 19 12 5 21 5 3" />
           </svg>
           <span>Analizador</span>
         </button>
-        <button class="tool-tab-btn" id="tabBtnConsultor" type="button" title="Buscar software en los reportes JSON">
+        <button class="tool-tab-btn" id="tabBtnConsultor" type="button" role="tab" aria-selected="false" aria-controls="viewConsultor" title="Buscar software en los reportes JSON">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
           <span>Consultor</span>
         </button>
-        <button class="tool-tab-btn" id="tabBtnReporte" type="button" title="Inspeccionar una sola máquina virtual">
+        <button class="tool-tab-btn" id="tabBtnReporte" type="button" role="tab" aria-selected="false" aria-controls="viewReporte" title="Inspeccionar una sola máquina virtual">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" />
           </svg>
@@ -60,7 +60,7 @@
   </header>
 
   <main class="app-viewport">
-    <section class="tool-view-panel active" id="viewAnalizador">
+    <section class="tool-view-panel active" id="viewAnalizador" role="tabpanel" aria-labelledby="tabBtnAnalizador">
       <div class="app-hero-brand">
         <div class="brand-wrapper">
           <div class="brand-logo-container">
@@ -76,7 +76,7 @@
               <span class="brand-title-app">VM Inventory</span>
               <span class="brand-title-sub">| Analizador</span>
             </div>
-            <div class="brand-subtitle-tag">Busca recursivamente discos virtuales y genera reportes consolidados con el motor vmspect.</div>
+            <div class="brand-subtitle-tag"><strong>Inventariar máquinas virtuales.</strong> Busca discos virtuales en una carpeta de origen y genera un reporte JSON consolidado.</div>
           </div>
         </div>
       </div>
@@ -114,7 +114,7 @@
             </div>
             <button class="step-card action-card" id="btnIniciarAccion" type="button" disabled>
               <span class="step-icon-box" id="iconAnalisis"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3" /></svg></span>
-              <span class="step-details"><span class="step-title" id="lblTitleAccion">Análisis</span><span class="step-subtitle" id="lblHilosAccion">Pendiente</span></span>
+              <span class="step-details"><span class="step-title" id="lblTitleAccion">Iniciar análisis</span><span class="step-subtitle" id="lblHilosAccion">Selecciona origen y destino</span></span>
             </button>
           </div>
         </section>
@@ -122,8 +122,8 @@
         <section class="analyzer-phase analyzer-results-panel" aria-labelledby="analyzerResultsTitle">
           <header class="phase-heading">
             <div class="phase-index">02 <span>/ SALIDA</span></div>
-            <h2 id="analyzerResultsTitle">Resultados y telemetría</h2>
-            <p>Supervisa el avance, el rendimiento y las incidencias del procesamiento.</p>
+            <h2 id="analyzerResultsTitle">Progreso y resultados</h2>
+            <p>Sigue el avance en tiempo real y revisa el resumen al finalizar. La bitácora técnica queda disponible debajo si la necesitas.</p>
           </header>
 
           <div class="telemetry-deck">
@@ -156,7 +156,7 @@
             </div>
             <div class="workers-box" id="wrapperWorkers" style="display:none"><div class="telemetry-kpi-label">Workers activos</div><div id="listWorkers"></div></div>
             <div class="inspector-progress-box" id="wrapperVmIndividual" style="display:none">
-              <div style="display:flex;justify-content:space-between;gap:10px"><strong id="lblVmIndividualTitulo">VM actual</strong><span id="lblVmIndividualPorcentaje">0%</span></div>
+              <div class="inspector-progress-heading"><strong id="lblVmIndividualTitulo">VM actual</strong><span id="lblVmIndividualPorcentaje">0%</span></div>
               <div class="progress-rail"><div class="progress-fill progress-fill-individual" id="barVmIndividual" role="progressbar" aria-label="Progreso de la VM actual" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
               <div class="form-help" id="lblVmIndividualEtapa">En espera</div>
             </div>
@@ -173,7 +173,7 @@
       </div>
     </section>
 
-    <section class="tool-view-panel" id="viewConsultor">
+    <section class="tool-view-panel" id="viewConsultor" role="tabpanel" aria-labelledby="tabBtnConsultor">
       <div class="app-hero-brand">
         <div class="brand-wrapper">
           <div class="brand-logo-container">
@@ -188,9 +188,20 @@
               <span class="brand-title-app">VM Inventory</span>
               <span class="brand-title-sub">| Consultor</span>
             </div>
-            <div class="brand-subtitle-tag">Busca software instalado y localiza las máquinas virtuales de tus reportes JSON.</div>
+            <div class="brand-subtitle-tag"><strong>Buscar software en el inventario.</strong> Encuentra programas instalados y localiza las máquinas virtuales de tus reportes JSON.</div>
           </div>
         </div>
+      </div>
+
+      <div class="consultor-datasource-bar" id="consultorDatasourceBar">
+        <span class="consultor-datasource-icon" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+        </span>
+        <span class="consultor-datasource-text">
+          <span class="consultor-datasource-label">Fuente de datos:</span>
+          <span class="consultor-datasource-path" id="lblConsultorFuenteDatos">Sin configurar</span>
+        </span>
+        <button class="step-btn" id="btnConsultorCambiarFuente" type="button">Cambiar</button>
       </div>
 
       <div class="consultor-search-layout">
@@ -198,46 +209,54 @@
           <div class="consultor-search-row">
             <div class="consultor-input-group flex-app">
               <label class="form-label" for="inputBuscarPrograma">Programa o aplicación</label>
-              <div class="search-input-wrapper">
-                <input type="search" id="inputBuscarPrograma" class="form-input search-field" list="datalistProgramas" placeholder="Ej.: SQL Server, Python, Oracle" autocomplete="off" />
-                <button class="clear-search-btn" id="btnLimpiarPrograma" type="button" title="Borrar programa" aria-label="Borrar programa" style="display:none">×</button>
+              <div class="search-input-wrapper consultor-filter-control">
+                <input type="search" id="inputBuscarPrograma" class="form-input search-field" placeholder="Ej.: SQL Server, Python, Oracle" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+                <button class="consultor-filter-clear" id="btnLimpiarPrograma" type="button" aria-label="Limpiar Programa o aplicación" title="Limpiar">×</button>
+                <div class="consultor-suggestions" id="suggestionsProgramas" role="listbox"></div>
               </div>
-              <datalist id="datalistProgramas"></datalist>
             </div>
-            <div class="consultor-input-group flex-ver">
-              <label class="form-label" for="inputBuscarVersion">Versión</label>
-              <input type="search" id="inputBuscarVersion" class="form-input" list="datalistVersiones" placeholder="Ej.: 16.0" autocomplete="off" />
-              <datalist id="datalistVersiones"></datalist>
-            </div>
-          </div>
-
-          <div class="consultor-search-row">
             <div class="consultor-input-group flex-vm">
               <label class="form-label" for="inputBuscarVm">Máquina virtual</label>
-              <div class="search-input-wrapper">
-                <input type="search" id="inputBuscarVm" class="form-input search-field" list="datalistVms" placeholder="Ej.: Win10-Dev, Ubuntu-01" autocomplete="off" />
-                <button class="clear-search-btn" id="btnLimpiarVm" type="button" title="Borrar máquina virtual" aria-label="Borrar máquina virtual" style="display:none">×</button>
+              <div class="search-input-wrapper consultor-filter-control">
+                <input type="search" id="inputBuscarVm" class="form-input search-field" placeholder="Ej.: Win10-Dev, Ubuntu-01" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+                <button class="consultor-filter-clear" id="btnLimpiarVm" type="button" aria-label="Limpiar Máquina virtual" title="Limpiar">×</button>
+                <div class="consultor-suggestions" id="suggestionsVms" role="listbox"></div>
               </div>
-              <datalist id="datalistVms"></datalist>
             </div>
           </div>
 
-          <div class="consultor-search-row">
-            <div class="consultor-input-group flex-tipo">
-              <label class="form-label" for="selectBuscarTipo">Tipo</label>
-              <select id="selectBuscarTipo" class="form-input">
-                <option value="todos">Todos</option>
-                <option value="Personas">Personas</option>
-                <option value="Discos">Discos</option>
-                <option value="Servidores">Servidores</option>
-              </select>
+          <details class="consultor-more-filters" id="consultorMoreFilters">
+            <summary class="consultor-more-filters-summary">
+              <span>Más filtros</span>
+              <span class="consultor-more-filters-hint">Versión, tipo y responsable</span>
+            </summary>
+            <div class="consultor-search-row consultor-search-row-secondary">
+              <div class="consultor-input-group flex-ver">
+                <label class="form-label" for="inputBuscarVersion">Versión</label>
+                <div class="consultor-filter-control">
+                  <input type="search" id="inputBuscarVersion" class="form-input" placeholder="Ej.: 16.0" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+                  <button class="consultor-filter-clear" id="btnLimpiarVersion" type="button" aria-label="Limpiar Versión" title="Limpiar">×</button>
+                  <div class="consultor-suggestions" id="suggestionsVersiones" role="listbox"></div>
+                </div>
+              </div>
+              <div class="consultor-input-group flex-tipo">
+                <label class="form-label" for="selectBuscarTipo">Tipo</label>
+                <select id="selectBuscarTipo" class="form-input consultor-filter-select">
+                  <option value="todos">Todos</option>
+                </select>
+              </div>
+              <div class="consultor-input-group flex-owner">
+                <label class="form-label" for="inputBuscarResponsable">Responsable</label>
+                <div class="consultor-filter-control">
+                  <input type="search" id="inputBuscarResponsable" class="form-input" placeholder="Ej.: Operador Alpha, Equipo 01" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" />
+                  <button class="consultor-filter-clear" id="btnLimpiarResponsable" type="button" aria-label="Limpiar Responsable" title="Limpiar">×</button>
+                  <div class="consultor-suggestions" id="suggestionsResponsables" role="listbox"></div>
+                </div>
+              </div>
             </div>
-            <div class="consultor-input-group flex-owner">
-              <label class="form-label" for="inputBuscarPropietario">Asignado o elemento</label>
-              <input type="search" id="inputBuscarPropietario" class="form-input" list="datalistPropietarios" placeholder="Ej.: Operador Alpha, Disco 01" autocomplete="off" />
-              <datalist id="datalistPropietarios"></datalist>
-            </div>
-          </div>
+          </details>
+
+          <div class="consultor-active-filters" id="consultorActiveFilters" style="display:none"></div>
         </div>
 
         <div class="consultor-actions-card">
@@ -247,8 +266,9 @@
         </div>
       </div>
 
-      <div class="consultor-summary-bar">
-        <div class="consultor-summary-info" id="lblSoftwareMetricas">Configura una carpeta de reportes JSON para comenzar.</div>
+      <div class="consultor-summary-bar" role="status" aria-live="polite">
+        <div class="consultor-summary-info" id="lblSoftwareMetricas">Configura la carpeta de inventario para comenzar.</div>
+        <span class="consultor-loading-indicator" id="consultorLoadingIndicator" style="display:none"><span class="consultor-spinner" aria-hidden="true"></span>Buscando…</span>
       </div>
 
       <div class="consultor-results-wrapper">
@@ -262,16 +282,16 @@
       </div>
     </section>
 
-    <section class="tool-view-panel" id="viewReporte">
+    <section class="tool-view-panel" id="viewReporte" role="tabpanel" aria-labelledby="tabBtnReporte">
       <div class="app-hero-brand">
         <div class="brand-wrapper">
           <div class="brand-logo-container"><div class="brand-logo-symbol" aria-hidden="true"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg></div></div>
-          <div><div class="brand-title-main"><span class="brand-title-app">VM Inventory</span><span class="brand-title-sub">| Reporte</span></div><div class="brand-subtitle-tag">Inspecciona una sola máquina virtual y consulta sus discos, sistema operativo, particiones y software.</div></div>
+          <div><div class="brand-title-main"><span class="brand-title-app">VM Inventory</span><span class="brand-title-sub">| Reporte</span></div><div class="brand-subtitle-tag"><strong>Inspeccionar imagen de disco.</strong> Analiza un disco virtual o un reporte JSON y muestra su sistema operativo, particiones y software.</div></div>
         </div>
       </div>
 
       <div class="report-selection-row">
-        <div class="step-card" id="cardStepDiscoReporte" role="button" tabindex="0" title="Seleccionar disco virtual o reporte JSON">
+        <div class="step-card" id="cardStepDiscoReporte" role="button" tabindex="0" aria-label="Seleccionar disco virtual o reporte JSON" title="Seleccionar disco virtual o reporte JSON">
           <div class="step-icon-box"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg></div>
           <div class="step-details"><div class="step-title">Virtual</div><div class="step-subtitle" id="lblDiscoReporteRuta">Seleccionar disco o reporte JSON</div></div>
           <button class="step-btn" id="btnSeleccionarDiscoReporte" type="button">Examinar</button>
@@ -281,10 +301,11 @@
           <span class="step-details"><span class="step-title">Generar reporte</span><span class="step-subtitle">Inspección con vmspect</span></span>
         </button>
       </div>
+      <p class="form-help report-config-note">Esta inspección usa la configuración avanzada del Analizador (workers, acceso a discos y reglas de clasificación). Para cambiarla, andá a la pestaña <strong>Analizador → Configuración</strong>.</p>
 
-      <div class="inspector-progress-box" id="wrapperProgresoReporte" style="display:none">
-        <div style="display:flex;justify-content:space-between;gap:10px"><strong id="lblEtapaReporte">Iniciando inspección estática</strong><span id="lblPorcentajeReporte">0%</span></div>
-        <div class="progress-rail"><div class="progress-fill" id="barProgresoReporte"></div></div>
+      <div class="inspector-progress-box" id="wrapperProgresoReporte" style="display:none" role="status" aria-live="polite">
+        <div class="inspector-progress-heading"><strong id="lblEtapaReporte">Iniciando inspección estática</strong><span id="lblPorcentajeReporte">0%</span></div>
+        <div class="progress-rail"><div class="progress-fill" id="barProgresoReporte" role="progressbar" aria-label="Progreso de la inspección" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></div></div>
         <div class="form-help" id="lblDetalleReporte"></div>
       </div>
 
@@ -293,29 +314,46 @@
         <div>Selecciona una imagen de disco o un reporte JSON para comenzar.</div>
       </div>
 
-      <div class="inspector-results-wrapper" id="containerResultadosReporte">
-        <div id="reporteWarningsBox"></div>
-        <div class="inspector-card">
-          <div class="inspector-card-header"><div class="inspector-card-title">Imagen y rendimiento</div><button class="step-btn" id="btnExportarReporte" type="button" disabled>Exportar JSON</button></div>
-          <div class="inspector-data-grid">
-            <div class="inspector-data-item"><span class="inspector-data-label">Archivo</span><strong id="lblReporteArchivo">-</strong></div>
-            <div class="inspector-data-item"><span class="inspector-data-label">Formato</span><strong id="lblReporteFormato">-</strong></div>
-            <div class="inspector-data-item"><span class="inspector-data-label">Hipervisor</span><strong id="lblReporteHipervisor">-</strong></div>
-            <div class="inspector-data-item"><span class="inspector-data-label">Tamaño virtual</span><strong id="lblReporteTamanoVirtual">-</strong></div>
-            <div class="inspector-data-item"><span class="inspector-data-label">Tamaño real</span><strong id="lblReporteTamanoReal">-</strong></div>
-            <div class="inspector-data-item"><span class="inspector-data-label">Modo de acceso</span><strong id="lblReporteAcceso">-</strong></div>
-            <div class="inspector-data-item"><span class="inspector-data-label">Duración</span><strong id="lblReporteDuracion">-</strong></div>
-            <div class="inspector-data-item"><span class="inspector-data-label">Bytes leídos</span><strong id="lblReporteBytesLeidos">-</strong></div>
-            <div class="inspector-data-item"><span class="inspector-data-label">Llamadas QEMU</span><strong id="lblReporteQemuCalls">-</strong></div>
+      <div class="inspector-results-wrapper inspector-report-card" id="containerResultadosReporte">
+        <div class="inspector-report-header">
+          <div>
+            <div class="inspector-card-title">Reporte generado</div>
+            <p class="inspector-card-subtitle">Resumen completo de la imagen inspeccionada.</p>
           </div>
+          <button class="step-action-btn" id="btnExportarReporte" type="button" disabled title="Disponible cuando el informe se genera correctamente">Exportar JSON</button>
         </div>
+        <div class="inspector-report-body">
+          <div id="reporteWarningsBox"></div>
+          <div class="inspector-card">
+            <div class="inspector-card-header">
+              <div>
+                <div class="inspector-card-title">Resumen del resultado</div>
+                <p class="inspector-card-subtitle">Datos generales de la imagen inspeccionada.</p>
+              </div>
+            </div>
+            <div class="inspector-data-grid">
+              <div class="inspector-data-item"><span class="inspector-data-label">Archivo</span><strong id="lblReporteArchivo">-</strong></div>
+              <div class="inspector-data-item"><span class="inspector-data-label">Formato</span><strong id="lblReporteFormato">-</strong></div>
+              <div class="inspector-data-item"><span class="inspector-data-label">Hipervisor</span><strong id="lblReporteHipervisor">-</strong></div>
+              <div class="inspector-data-item"><span class="inspector-data-label">Tamaño virtual</span><strong id="lblReporteTamanoVirtual">-</strong></div>
+            </div>
+            <p class="inspector-subsection-title">Rendimiento de la inspección</p>
+            <div class="inspector-data-grid">
+              <div class="inspector-data-item"><span class="inspector-data-label">Tamaño real</span><strong id="lblReporteTamanoReal">-</strong></div>
+              <div class="inspector-data-item"><span class="inspector-data-label">Modo de acceso</span><strong id="lblReporteAcceso">-</strong></div>
+              <div class="inspector-data-item"><span class="inspector-data-label">Duración</span><strong id="lblReporteDuracion">-</strong></div>
+              <div class="inspector-data-item"><span class="inspector-data-label">Bytes leídos</span><strong id="lblReporteBytesLeidos">-</strong></div>
+              <div class="inspector-data-item"><span class="inspector-data-label">Llamadas QEMU</span><strong id="lblReporteQemuCalls">-</strong></div>
+            </div>
+          </div>
 
-        <div class="inspector-grid-two-col">
-          <div class="inspector-card"><div class="inspector-card-header"><div class="inspector-card-title">Sistema operativo</div></div><div class="inspector-os-body"><div style="font-size:16px;font-weight:700" id="lblReporteSoNombre">No identificado</div><div class="form-help" id="lblReporteSoDetalles">Sin datos de compilación</div><div class="form-help" style="margin-top:10px">VM Tools: <span id="lblReporteVmTools">-</span></div></div></div>
-          <div class="inspector-card"><div class="inspector-card-header"><div class="inspector-card-title">Particiones <span class="consultor-version-badge" id="lblReporteEsquema">Tabla: -</span></div></div><div class="inspector-partitions-list" id="listReporteParticiones"></div></div>
+          <div class="inspector-grid-two-col">
+            <div class="inspector-card"><div class="inspector-card-header"><div class="inspector-card-title">Sistema operativo</div></div><div class="inspector-os-body"><div class="inspector-os-name" id="lblReporteSoNombre">No identificado</div><div class="form-help" id="lblReporteSoDetalles">Sin datos de compilación</div><div class="form-help inspector-os-extra">VM Tools: <span id="lblReporteVmTools">-</span></div></div></div>
+            <div class="inspector-card"><div class="inspector-card-header"><div class="inspector-card-title">Particiones <span class="consultor-version-badge" id="lblReporteEsquema">Tabla: -</span></div></div><div class="inspector-partitions-list" id="listReporteParticiones"></div></div>
+          </div>
+
+          <div class="inspector-card"><div class="inspector-card-header"><div class="inspector-card-title">Software detectado</div><span class="telemetry-kpi-sub" id="lblTotalProgramasReporte">0 programas</span></div><div class="inspector-table-filters"><input type="search" id="inputFiltrarSoftwareReporte" class="form-input" placeholder="Filtrar por nombre, editor o tag..." /><select id="selectCategoriaSoftwareReporte" class="form-input inspector-category-select"><option value="todas">Todas las categorías</option></select></div><div class="inspector-table-wrapper"><table class="inspector-table"><thead><tr><th>Programa</th><th>Versión</th><th>Editor</th><th>Categoría</th><th>Tags</th></tr></thead><tbody id="tbodySoftwareReporte"></tbody></table></div></div>
         </div>
-
-        <div class="inspector-card"><div class="inspector-card-header"><div class="inspector-card-title">Software detectado</div><span class="telemetry-kpi-sub" id="lblTotalProgramasReporte">0 programas</span></div><div class="inspector-table-filters"><input type="search" id="inputFiltrarSoftwareReporte" class="form-input" placeholder="Filtrar por nombre, editor o tag..." /><select id="selectCategoriaSoftwareReporte" class="form-input" style="max-width:220px"><option value="todas">Todas las categorías</option></select></div><div class="inspector-table-wrapper"><table class="inspector-table"><thead><tr><th>Programa</th><th>Versión</th><th>Editor</th><th>Categoría</th><th>Tags</th></tr></thead><tbody id="tbodySoftwareReporte"></tbody></table></div></div>
       </div>
     </section>
   </main>
@@ -326,19 +364,27 @@
   </footer>
 
   <div class="modal-overlay" id="modalConfigConsultor" aria-hidden="true">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="configConsultorTitle">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="configConsultorTitle" aria-describedby="configConsultorDesc">
       <div class="modal-header">
-        <div class="modal-title" id="configConsultorTitle">Configuración del Consultor</div>
-        <button class="modal-close-btn" id="btnCloseConfigConsultor" type="button" title="Cerrar">×</button>
+        <div>
+          <div class="modal-title" id="configConsultorTitle">Configuración del Consultor</div>
+          <p class="modal-subtitle" id="configConsultorDesc">Elegí la carpeta de inventario donde están los reportes JSON.</p>
+        </div>
+        <button class="modal-close-btn" id="btnCloseConfigConsultor" type="button" title="Cerrar" aria-label="Cerrar configuración del Consultor">×</button>
       </div>
       <div class="modal-body">
         <div class="form-field">
-          <label class="form-label" for="cfgRutaBdJson">Directorio de reportes JSON</label>
-          <div style="display:flex;gap:8px">
-            <input id="cfgRutaBdJson" class="form-input" type="text" placeholder="Carpeta donde se encuentran los reportes" style="flex:1" />
+          <label class="form-label" for="cfgLimiteCoincidencias">Máximo de coincidencias por búsqueda</label>
+          <input id="cfgLimiteCoincidencias" class="form-input" type="number" min="10" max="100" step="1" value="30" />
+          <div class="form-help">Limita los resultados mostrados para mantener la consulta ágil. Se permiten valores entre 10 y 100.</div>
+        </div>
+        <div class="form-field">
+          <label class="form-label" for="cfgRutaBdJson">Carpeta de inventario (reportes JSON)</label>
+          <div class="form-field-row">
+            <input id="cfgRutaBdJson" class="form-input" type="text" placeholder="Carpeta donde se encuentran los reportes" />
             <button class="step-btn" id="btnExaminarBdJson" type="button">Examinar</button>
           </div>
-          <div class="form-help">Se consultan los archivos <code>.json</code> de esta carpeta.</div>
+          <div class="form-help">Cada subcarpeta directa legible define un tipo. El Consultor busca archivos <code>.json</code> dentro de esas carpetas; los archivos en la raíz no se indexan.</div>
         </div>
       </div>
       <div class="modal-footer">
@@ -349,25 +395,71 @@
   </div>
 
   <div class="modal-overlay" id="modalConfigAnalizador" aria-hidden="true">
-    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="configAnalizadorTitle">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="configAnalizadorTitle" aria-describedby="configAnalizadorDesc">
       <div class="modal-header">
-        <div class="modal-title" id="configAnalizadorTitle">Configuración del motor vmspect</div>
-        <button class="modal-close-btn" id="btnCloseConfigAnalizador" type="button" title="Cerrar">×</button>
+        <div>
+          <div class="modal-title" id="configAnalizadorTitle">Configuración avanzada del Analizador</div>
+          <p class="modal-subtitle" id="configAnalizadorDesc">Ajustes del motor vmspect para rendimiento, acceso a discos, clasificación y bitácora.</p>
+        </div>
+        <button class="modal-close-btn" id="btnCloseConfigAnalizador" type="button" title="Cerrar" aria-label="Cerrar configuración del Analizador">×</button>
       </div>
       <div class="modal-body">
-        <div class="form-field"><label class="form-label" for="cfgMaxHilos">Workers concurrentes (1–32)</label><input id="cfgMaxHilos" class="form-input" type="number" min="1" max="32" value="4" /></div>
-        <div class="form-field"><label class="form-label" for="cfgTamanoChunk">Tamaño de chunk (KB, opcional)</label><input id="cfgTamanoChunk" class="form-input" type="number" min="1" placeholder="Predeterminado del motor" /></div>
-        <div class="form-checkbox-row"><input id="cfgModoDump" type="checkbox" /><label class="form-checkbox-label" for="cfgModoDump">Conservar todo el software detectado (modo dump)</label></div>
-        <div class="form-checkbox-row"><input id="cfgIncluirSystem" type="checkbox" /><label class="form-checkbox-label" for="cfgIncluirSystem">Incluir la colmena SYSTEM de Windows</label></div>
-        <div class="form-checkbox-row"><input id="cfgForzarQemu" type="checkbox" /><label class="form-checkbox-label" for="cfgForzarQemu">Solicitar backend qemu-nbd a vmspect</label></div>
-        <div class="form-field"><label class="form-label" for="cfgRutaQemu">Ruta opcional de qemu-nbd para vmspect</label><div style="display:flex;gap:8px"><input id="cfgRutaQemu" class="form-input" type="text" style="flex:1" /><button class="step-btn" id="btnExaminarQemu" type="button">Examinar</button></div><div class="form-help">La resolución y ejecución del binario pertenecen exclusivamente a vmspect durante la inspección.</div></div>
-        <div class="form-field"><label class="form-label" for="cfgRutaReglas">Archivo de reglas (opcional)</label><div style="display:flex;gap:8px"><input id="cfgRutaReglas" class="form-input" type="text" style="flex:1" /><button class="step-btn" id="btnExaminarReglas" type="button">Examinar</button></div></div>
-        <div class="form-checkbox-row"><input id="cfgGenerarDiscrepancias" type="checkbox" /><label class="form-checkbox-label" for="cfgGenerarDiscrepancias">Detectar discrepancias entre carpeta y nombre interno</label></div>
-        <div class="form-checkbox-row"><input id="cfgHabilitarBitacora" type="checkbox" /><label class="form-checkbox-label" for="cfgHabilitarBitacora">Mostrar bitácora en vivo</label></div>
-        <div class="form-checkbox-row"><input id="cfgMostrarProgresoIndividual" type="checkbox" /><label class="form-checkbox-label" for="cfgMostrarProgresoIndividual">Mostrar progreso individual de cada VM</label></div>
-        <div class="form-field"><label class="form-label" for="cfgNombreArchivo">Nombre del archivo de salida</label><input id="cfgNombreArchivo" class="form-input" type="text" value="Relevamiento_VMs.json" /></div>
+        <fieldset class="modal-fieldset">
+          <legend>Rendimiento</legend>
+          <div class="form-field">
+            <label class="form-label" for="cfgMaxHilos">Workers concurrentes (1–32)</label>
+            <input id="cfgMaxHilos" class="form-input" type="number" min="1" max="32" value="4" />
+            <div class="form-help">Cantidad de máquinas virtuales que se procesan al mismo tiempo. Más workers pueden acelerar el relevamiento, pero usan más CPU y disco.</div>
+          </div>
+          <div class="form-field">
+            <label class="form-label" for="cfgTamanoChunk">Tamaño de chunk (KB, opcional)</label>
+            <input id="cfgTamanoChunk" class="form-input" type="number" min="1" placeholder="Predeterminado del motor" />
+            <div class="form-help">Tamaño de los bloques de lectura del disco. Dejálo vacío para que vmspect use el valor recomendado.</div>
+          </div>
+        </fieldset>
+
+        <fieldset class="modal-fieldset">
+          <legend>Acceso a discos</legend>
+          <div class="form-checkbox-row"><input id="cfgForzarQemu" type="checkbox" /><label class="form-checkbox-label" for="cfgForzarQemu">Solicitar backend qemu-nbd a vmspect</label></div>
+          <div class="form-help form-help-indent">qemu-nbd es una herramienta externa para montar discos virtuales. Actívala solo si el modo de acceso nativo falla.</div>
+          <div class="form-field">
+            <label class="form-label" for="cfgRutaQemu">Ruta opcional de qemu-nbd para vmspect</label>
+            <div class="form-field-row"><input id="cfgRutaQemu" class="form-input" type="text" /><button class="step-btn" id="btnExaminarQemu" type="button">Examinar</button></div>
+            <div class="form-help">La resolución y ejecución del binario pertenecen exclusivamente a vmspect durante la inspección.</div>
+          </div>
+        </fieldset>
+
+        <fieldset class="modal-fieldset">
+          <legend>Clasificación y reglas</legend>
+          <div class="form-checkbox-row"><input id="cfgModoDump" type="checkbox" /><label class="form-checkbox-label" for="cfgModoDump">Conservar todo el software detectado (modo dump)</label></div>
+          <div class="form-help form-help-indent">Si está desactivado, se descarta el software que las reglas de clasificación no consideren relevante.</div>
+          <div class="form-checkbox-row"><input id="cfgIncluirSystem" type="checkbox" /><label class="form-checkbox-label" for="cfgIncluirSystem">Incluir la colmena SYSTEM de Windows</label></div>
+          <div class="form-help form-help-indent">La colmena SYSTEM es una rama del registro de Windows con datos de configuración del equipo. Incluirla amplía el análisis, pero es más lento.</div>
+          <div class="form-field">
+            <label class="form-label" for="cfgRutaReglas">Archivo de reglas (opcional)</label>
+            <div class="form-field-row"><input id="cfgRutaReglas" class="form-input" type="text" /><button class="step-btn" id="btnExaminarReglas" type="button">Examinar</button></div>
+            <div class="form-help">Archivo JSON o TOML con reglas propias de clasificación. Si se deja vacío, se usan las reglas predeterminadas.</div>
+          </div>
+          <div class="form-checkbox-row"><input id="cfgGenerarDiscrepancias" type="checkbox" /><label class="form-checkbox-label" for="cfgGenerarDiscrepancias">Detectar discrepancias entre carpeta y nombre interno</label></div>
+          <div class="form-help form-help-indent">Marca las VMs cuyo nombre de carpeta no coincide con el nombre configurado dentro de la máquina virtual.</div>
+        </fieldset>
+
+        <fieldset class="modal-fieldset">
+          <legend>Seguimiento y bitácora</legend>
+          <div class="form-checkbox-row"><input id="cfgHabilitarBitacora" type="checkbox" /><label class="form-checkbox-label" for="cfgHabilitarBitacora">Mostrar bitácora en vivo</label></div>
+          <div class="form-help form-help-indent">Muestra un registro técnico detallado durante el relevamiento; útil para diagnosticar errores.</div>
+          <div class="form-checkbox-row"><input id="cfgMostrarProgresoIndividual" type="checkbox" /><label class="form-checkbox-label" for="cfgMostrarProgresoIndividual">Mostrar progreso individual de cada VM</label></div>
+          <div class="form-help form-help-indent">Agrega una barra de progreso adicional para la VM que se está procesando en este momento.</div>
+        </fieldset>
+
+        <p class="form-help modal-filename-note">El nombre del archivo de salida se define en el paso <strong>“Nombre JSON”</strong> del panel principal del Analizador.</p>
       </div>
-      <div class="modal-footer"><button class="step-btn" id="btnCancelarConfigAnalizador" type="button">Cancelar</button><button class="step-action-btn" id="btnGuardarConfigAnalizador" type="button">Guardar cambios</button></div>
+      <div class="modal-footer">
+        <button class="step-btn" id="btnRestablecerConfigAnalizador" type="button">Restablecer valores predeterminados</button>
+        <span class="modal-footer-spacer"></span>
+        <button class="step-btn" id="btnCancelarConfigAnalizador" type="button">Cancelar</button>
+        <button class="step-action-btn" id="btnGuardarConfigAnalizador" type="button">Guardar cambios</button>
+      </div>
     </div>
   </div>
 

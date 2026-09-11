@@ -2,12 +2,9 @@
 
 use app_lib::clasificacion::{
     coincide_patron, CategoriaReglas, ClasificacionSoftware, EntradaPatron, ExclusionesConfig,
-    ReglasClasificacion,
+    ReglasArchivo, ReglasClasificacion,
 };
-use app_lib::consultor::{
-    deducir_nombre_entidad_desde_archivo, normalizar_categoria_origen, sanitizar_opcion,
-    texto_coincide, FiltrosConsultor,
-};
+use app_lib::consultor::{sanitizar_opcion, texto_coincide, FiltrosConsultor};
 use app_lib::models::AppState;
 use app_lib::relevamiento::formatear_duracion;
 use std::path::{Path, PathBuf};
@@ -56,32 +53,34 @@ fn el_motor_de_patrones_y_reglas_es_determinista() {
     assert!(exclusiones.es_archivo_excluido("snapshot.temporary"));
     assert!(!exclusiones.es_archivo_excluido("snapshot.data"));
 
-    let reglas = ReglasClasificacion {
-        origen: "fixture".to_string(),
-        exclusions: ExclusionesConfig::default(),
-        classifications: vec![ClasificacionSoftware {
-            vendor: None,
-            software: "Analytics Client".to_string(),
-            patterns: vec!["*Analytics*".to_string()],
-            category: Some("Analytics".to_string()),
-            tags: vec!["data".to_string()],
-        }],
-        whitelist: vec![EntradaPatron {
-            patron: "Critical Tool".to_string(),
-            editor: None,
-            motivo: "Fixture prioritario".to_string(),
-        }],
-        ruido: vec![EntradaPatron {
-            patron: "Telemetry Agent".to_string(),
-            editor: None,
-            motivo: "Fixture no relevante".to_string(),
-        }],
-        categorias: vec![CategoriaReglas {
-            nombre: "Utilities".to_string(),
-            patrones: vec!["*Utility*".to_string()],
-            tags: vec!["utility".to_string()],
-        }],
-    };
+    let reglas = ReglasClasificacion::desde_configuracion(
+        "fixture",
+        ReglasArchivo {
+            exclusions: ExclusionesConfig::default(),
+            classifications: vec![ClasificacionSoftware {
+                vendor: None,
+                software: "Analytics Client".to_string(),
+                patterns: vec!["*Analytics*".to_string()],
+                category: Some("Analytics".to_string()),
+                tags: vec!["data".to_string()],
+            }],
+            whitelist: vec![EntradaPatron {
+                patron: "Critical Tool".to_string(),
+                editor: None,
+                motivo: "Fixture prioritario".to_string(),
+            }],
+            noise: vec![EntradaPatron {
+                patron: "Telemetry Agent".to_string(),
+                editor: None,
+                motivo: "Fixture no relevante".to_string(),
+            }],
+            categories: vec![CategoriaReglas {
+                nombre: "Utilities".to_string(),
+                patrones: vec!["*Utility*".to_string()],
+                tags: vec!["utility".to_string()],
+            }],
+        },
+    );
 
     let whitelisted = reglas.clasificar("Critical Tool", None);
     assert!(whitelisted.es_relevante);
@@ -111,19 +110,14 @@ fn normaliza_filtros_y_valores_de_dominio_sin_asumir_plataforma() {
     assert_eq!(filters.version.as_deref(), Some("1.2"));
     assert_eq!(filters.vm, None);
     assert_eq!(filters.tipo, None);
-    assert_eq!(filters.propietario, None);
+    assert_eq!(filters.responsable, None);
 
     assert!(texto_coincide("Example_VM", "example vm"));
     assert_eq!(sanitizar_opcion(Some(" undefined ")), None);
-    assert_eq!(sanitizar_opcion(Some("Owner")), Some("Owner".to_string()));
-    assert_eq!(normalizar_categoria_origen("servers"), "Servidores");
-    assert_eq!(normalizar_categoria_origen("disk-pool"), "Discos");
-    assert_eq!(normalizar_categoria_origen("workgroup"), "Personas");
     assert_eq!(
-        deducir_nombre_entidad_desde_archivo("team_alpha"),
-        Some("team alpha".to_string())
+        sanitizar_opcion(Some("Responsable")),
+        Some("Responsable".to_string())
     );
-    assert_eq!(deducir_nombre_entidad_desde_archivo("reporte"), None);
 }
 
 #[test]
@@ -138,10 +132,11 @@ fn mantiene_el_estado_de_cancelacion_y_los_formatos_compartidos() {
         .cancel_requested
         .load(std::sync::atomic::Ordering::Relaxed));
 
-    state.preparar_tarea();
+    let operacion = state.iniciar_tarea().expect("debe iniciar la operación");
     assert!(!state
         .cancel_requested
         .load(std::sync::atomic::Ordering::Relaxed));
+    drop(operacion);
 
     assert_eq!(formatear_duracion(0), "00:00");
     assert_eq!(formatear_duracion(65), "01:05");
@@ -151,7 +146,9 @@ fn mantiene_el_estado_de_cancelacion_y_los_formatos_compartidos() {
 #[test]
 fn consulta_reportes_json_sinteticos_entrega_el_contrato_del_consultor() {
     let directory = TemporaryDirectory::new("query");
-    let report = directory.path().join("inventory.json");
+    let tipo = directory.path().join("Operaciones");
+    std::fs::create_dir_all(&tipo).expect("Debe crearse el tipo dinámico");
+    let report = tipo.join("cluster_a.json");
     let content = r#"
     [
       {
@@ -227,8 +224,7 @@ fn consulta_reportes_json_sinteticos_entrega_el_contrato_del_consultor() {
     assert_eq!(all.total_archivos_json, 1);
     assert_eq!(all.total_vms_escaneadas, 2);
     assert_eq!(all.total_programas_indexados, 2);
-    assert!(all.tipos_disponibles.contains(&"Servidores".to_string()));
-    assert!(all.tipos_disponibles.contains(&"Personas".to_string()));
+    assert_eq!(all.tipos_disponibles, vec!["Operaciones"]);
     assert!(all.coincidencias.is_empty());
 
     let filtered = app_lib::consultor::consultar_software_inventario(
@@ -244,9 +240,10 @@ fn consulta_reportes_json_sinteticos_entrega_el_contrato_del_consultor() {
     assert_eq!(filtered.versiones_disponibles, vec!["1.2.3"]);
     assert_eq!(filtered.coincidencias.len(), 1);
     assert_eq!(filtered.coincidencias[0].nombre_vm, "vm-alpha");
+    assert_eq!(filtered.coincidencias[0].tipo, "Operaciones");
     assert_eq!(
-        filtered.coincidencias[0].tipo_posesion.as_deref(),
-        Some("Servidores")
+        filtered.coincidencias[0].responsable.as_deref(),
+        Some("cluster a")
     );
 
     let by_owner = app_lib::consultor::consultar_software_inventario(
@@ -255,9 +252,12 @@ fn consulta_reportes_json_sinteticos_entrega_el_contrato_del_consultor() {
         None,
         None,
         None,
-        Some("team-beta".to_string()),
+        Some("cluster a".to_string()),
     )
-    .expect("El filtro por propietario debe ser válido");
-    assert_eq!(by_owner.coincidencias.len(), 1);
-    assert_eq!(by_owner.coincidencias[0].nombre_programa, "Example Tool");
+    .expect("El filtro por responsable debe ser válido");
+    assert_eq!(by_owner.coincidencias.len(), 2);
+    assert!(by_owner
+        .coincidencias
+        .iter()
+        .any(|item| item.nombre_programa == "Example Tool"));
 }

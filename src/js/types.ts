@@ -4,6 +4,7 @@ export type ToolName = 'analizador' | 'consultor' | 'reporte';
 export interface AppConfig {
   tema: Theme;
   ruta_bd_json: string;
+  limite_coincidencias: number;
 }
 
 export interface AnalyzerConfig {
@@ -88,6 +89,7 @@ export interface DomElementLike {
 
 export interface DocumentLike {
   getElementById(id: string): DomElementLike | null;
+  addEventListener?(type: string, listener: DomEventListener): void;
 }
 
 export interface SearchFilters {
@@ -95,7 +97,7 @@ export interface SearchFilters {
   vm: string;
   version: string;
   tipo: string;
-  propietario: string;
+  responsable: string;
 }
 
 export interface ConsultarSoftwarePayload {
@@ -104,7 +106,8 @@ export interface ConsultarSoftwarePayload {
   filtroVm: string | null;
   filtroVersion: string | null;
   filtroTipo: string | null;
-  filtroPropietario: string | null;
+  filtroResponsable: string | null;
+  limiteCoincidencias?: number;
 }
 
 export interface CoincidenciaSoftware {
@@ -116,12 +119,8 @@ export interface CoincidenciaSoftware {
   nombre_vm?: string | null;
   nombre_interno?: string | null;
   ruta_carpeta?: string | null;
-  propietario?: string | null;
-  tipo_posesion?: string | null;
-  elemento_asignado?: string | null;
-  origen_categoria?: string | null;
-  asignado?: string | null;
-  elemento?: string | null;
+  responsable?: string | null;
+  tipo?: string | null;
   sistema_operativo?: string | null;
   peso_gb?: number | null;
   hipervisor?: string | null;
@@ -137,9 +136,7 @@ export interface ResultadoConsultaSoftware {
   programas_disponibles?: unknown[];
   vms_disponibles?: unknown[];
   versiones_disponibles?: unknown[];
-  propietarios_disponibles?: unknown[];
-  asignados_disponibles?: unknown[];
-  elementos_disponibles?: unknown[];
+  responsables_disponibles?: unknown[];
   tipos_disponibles?: unknown[];
   categorias_disponibles?: unknown[];
   tags_disponibles?: unknown[];
@@ -167,6 +164,24 @@ export interface AnalyzerConfigPayload {
   nombre_archivo_salida: string;
 }
 
+export interface MetricasRelevamiento {
+  discovery_ms: number;
+  batch_ms: number;
+  summary_mapping_ms: number;
+  serialization_ms: number;
+  ipc_ms: number;
+  store_update_ms: number;
+  ui_render_ms: number;
+  total_ms: number;
+  selected_roots: number;
+  discovered_count: number;
+  unique_count: number;
+  reports_count: number;
+  errors_count: number;
+  inspections_count: number;
+  retries_count: number;
+}
+
 export interface ResumenRelevamiento {
   fase: string;
   total_vms: number;
@@ -179,6 +194,7 @@ export interface ResumenRelevamiento {
   duracion_formateada: string;
   ruta_informe: string;
   cancelado: boolean;
+  metricas: MetricasRelevamiento;
 }
 
 export interface VmActiva {
@@ -217,6 +233,16 @@ export interface EstadoSupervision {
   vms_activas: VmActiva[];
   logs_recientes: LogSupervision[];
   peso_total_procesado_gb: number;
+}
+
+export interface InspectionProgress {
+  completed_tasks: number;
+  total_tasks: number;
+  percentage: number;
+  stage_id: number;
+  bytes_processed: number;
+  total_bytes: number;
+  cancelled: boolean;
 }
 
 export interface ProgresoInspeccion {
@@ -316,13 +342,13 @@ export interface WindowApi {
 
 export interface ConsultorApi {
   consultarSoftware(payload: ConsultarSoftwarePayload): Promise<ResultadoConsultaSoftware>;
-  abrirCarpeta(ruta: string): Promise<unknown>;
   ventana: WindowApi;
 }
 
 export interface AppApi extends ConsultorApi {
   obtenerVersion(): Promise<string>;
   procesarRelevamiento(payload: RelevamientoPayload): Promise<ResumenRelevamiento>;
+  inspectionProgress(): Promise<InspectionProgress>;
   detenerInspeccion(): Promise<unknown>;
   inspeccionarDisco(
     rutaDisco: string,
@@ -339,10 +365,12 @@ export interface ConsultorFlowUi {
   btnLimpiarFiltros?: DomElementLike | null;
   btnLimpiarPrograma?: DomElementLike | null;
   btnLimpiarVm?: DomElementLike | null;
+  btnLimpiarVersion?: DomElementLike | null;
+  btnLimpiarResponsable?: DomElementLike | null;
   inputBuscarPrograma?: DomElementLike | null;
   inputBuscarVm?: DomElementLike | null;
   inputBuscarVersion?: DomElementLike | null;
-  inputBuscarPropietario?: DomElementLike | null;
+  inputBuscarResponsable?: DomElementLike | null;
   selectBuscarTipo?: DomElementLike | null;
   btnToggleTheme?: DomElementLike | null;
   btnWinMinimize?: DomElementLike | null;
@@ -355,6 +383,8 @@ export interface ConsultorFlowUi {
   btnGuardarConfigConsultor?: DomElementLike | null;
   btnExaminarBdJson?: DomElementLike | null;
   cfgRutaBdJson?: DomElementLike | null;
+  cfgLimiteCoincidencias?: DomElementLike | null;
+  consultorActiveFilters?: DomElementLike | null;
   actualizarBotonesLimpieza?(): void;
   limpiarFiltros?(): void;
   sincronizarAjustes?(config: AppConfig): void;
@@ -362,14 +392,12 @@ export interface ConsultorFlowUi {
     programas?: unknown[],
     vms?: unknown[],
     versiones?: unknown[],
-    propietarios?: unknown[],
-    asignados?: unknown[],
-    elementos?: unknown[]
+    responsables?: unknown[]
   ): void;
+  poblarTipos?(tipos?: unknown[]): void;
   renderResultadosSoftware?(
     resultado: ResultadoConsultaSoftware | null,
-    filtros?: Partial<SearchFilters>,
-    onAbrirUbicacion?: (path: string) => void
+    filtros?: Partial<SearchFilters>
   ): void;
   mostrarError?(error: unknown): void;
   setRecargando?(active: boolean): void;

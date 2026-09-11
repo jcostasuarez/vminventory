@@ -102,6 +102,9 @@ pub struct ReglasArchivo {
 }
 
 /// Conjunto completo de reglas de clasificación cargado en memoria.
+///
+/// Si se modifican directamente sus colecciones públicas, se debe llamar a
+/// [`ReglasClasificacion::recompilar_matchers`] antes de volver a clasificar.
 #[derive(Clone, Debug)]
 pub struct ReglasClasificacion {
     pub origen: String,
@@ -110,6 +113,70 @@ pub struct ReglasClasificacion {
     pub whitelist: Vec<EntradaPatron>,
     pub ruido: Vec<EntradaPatron>,
     pub categorias: Vec<CategoriaReglas>,
+    compiladas: ReglasCompiladas,
+}
+
+/// Instantánea inmutable de los matchers de una configuración de reglas.
+///
+/// Se construye una vez al cargar o crear las reglas y no requiere
+/// sincronización durante la clasificación.
+#[derive(Clone, Debug)]
+struct ReglasCompiladas {
+    exclusiones: ExclusionesCompiladas,
+    clasificaciones: Vec<ClasificacionSoftwareCompilada>,
+    whitelist: Vec<EntradaPatronCompilada>,
+    ruido: Vec<EntradaPatronCompilada>,
+    categorias: Vec<CategoriaReglasCompilada>,
+}
+
+#[derive(Clone, Debug)]
+struct ExclusionesCompiladas {
+    carpetas: Vec<PatronCompilado>,
+    archivos: Vec<PatronCompilado>,
+}
+
+#[derive(Clone, Debug)]
+struct ClasificacionSoftwareCompilada {
+    vendor: Option<PatronCompilado>,
+    software: String,
+    patrones: Vec<PatronCompilado>,
+    categoria: Option<String>,
+    tags: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct EntradaPatronCompilada {
+    patron: PatronCompilado,
+    editor: Option<PatronCompilado>,
+    motivo: String,
+}
+
+#[derive(Clone, Debug)]
+struct CategoriaReglasCompilada {
+    nombre: String,
+    patrones: Vec<PatronCompilado>,
+    tags: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+struct PatronCompilado {
+    original: String,
+    matcher: MatcherPatron,
+}
+
+#[derive(Clone, Debug)]
+enum MatcherPatron {
+    Vacio,
+    Regex(regex::Regex),
+    Palabra { normalizado: String },
+    Subcadena { normalizado: String },
+}
+
+#[derive(Clone, Debug)]
+struct DiagnosticoPatron {
+    contexto: String,
+    patron: String,
+    detalle: String,
 }
 
 // ============================================================================
@@ -176,14 +243,7 @@ pub fn asegurar_archivo_predeterminado() -> PathBuf {
 
 /// Devuelve la plantilla JSON por defecto formateada para producción.
 pub fn plantilla_json_predeterminada() -> String {
-    let reglas = ReglasClasificacion::integradas();
-    let archivo = ReglasArchivo {
-        exclusions: reglas.exclusions,
-        classifications: reglas.classifications,
-        whitelist: reglas.whitelist,
-        noise: reglas.ruido,
-        categories: reglas.categorias,
-    };
+    let archivo = ReglasClasificacion::configuracion_integrada();
     serde_json::to_string_pretty(&archivo)
         .unwrap_or_else(|_| "{\n  \"exclusions\": {},\n  \"classifications\": []\n}".to_string())
 }
@@ -193,8 +253,8 @@ pub fn plantilla_json_predeterminada() -> String {
 // ============================================================================
 
 impl ReglasClasificacion {
-    /// Reglas integradas de fábrica listas para producción (incluye exclusiones, software industrial, whitelist, ruido y categorías).
-    pub fn integradas() -> Self {
+    /// Define las reglas integradas de fábrica antes de compilar sus matchers.
+    fn configuracion_integrada() -> ReglasArchivo {
         let exclusions = ExclusionesConfig {
             folders: vec![
                 "System Volume Information".to_string(),
@@ -798,14 +858,55 @@ impl ReglasClasificacion {
             ),
         ];
 
-        Self {
-            origen: "Reglas integradas (predeterminadas)".to_string(),
+        ReglasArchivo {
             exclusions,
             classifications,
             whitelist,
-            ruido,
-            categorias,
+            noise: ruido,
+            categories: categorias,
         }
+    }
+
+    /// Reglas integradas de fábrica listas para producción, con matchers compilados.
+    pub fn integradas() -> Self {
+        Self::desde_configuracion(
+            "Reglas integradas (predeterminadas)",
+            Self::configuracion_integrada(),
+        )
+    }
+
+    /// Construye una instantánea de reglas y compila sus matchers una sola vez.
+    ///
+    /// `ReglasArchivo` conserva exactamente el formato serializable de JSON/TOML;
+    /// los matchers son estado exclusivamente runtime.
+    pub fn desde_configuracion(origen: impl Into<String>, configuracion: ReglasArchivo) -> Self {
+        let origen = origen.into();
+        let compiladas = compilar_reglas(&configuracion, &origen);
+
+        Self {
+            origen,
+            exclusions: configuracion.exclusions,
+            classifications: configuracion.classifications,
+            whitelist: configuracion.whitelist,
+            ruido: configuracion.noise,
+            categorias: configuracion.categories,
+            compiladas,
+        }
+    }
+
+    /// Recompila la instantánea runtime después de modificar las reglas públicas.
+    ///
+    /// La recarga desde archivo y los constructores públicos ya lo realizan de
+    /// forma automática; este método solo es necesario para mutaciones directas.
+    pub fn recompilar_matchers(&mut self) {
+        let configuracion = ReglasArchivo {
+            exclusions: self.exclusions.clone(),
+            classifications: self.classifications.clone(),
+            whitelist: self.whitelist.clone(),
+            noise: self.ruido.clone(),
+            categories: self.categorias.clone(),
+        };
+        self.compiladas = compilar_reglas(&configuracion, &self.origen);
     }
 
     /// Carga las reglas desde un archivo JSON o TOML y las combina con las integradas.
@@ -818,7 +919,7 @@ impl ReglasClasificacion {
         })?;
 
         // Deserialización tolerante (JSON preferido, TOML fallback)
-        let archivo: ReglasArchivo = if let Ok(parsed) = serde_json::from_str(&contenido) {
+        let archivo_usuario: ReglasArchivo = if let Ok(parsed) = serde_json::from_str(&contenido) {
             parsed
         } else if let Ok(parsed) = toml::from_str(&contenido) {
             parsed
@@ -829,54 +930,58 @@ impl ReglasClasificacion {
             ));
         };
 
-        let mut reglas = Self::integradas();
-        reglas.origen = format!("Archivo: {}", ruta.display());
+        // Se combinan primero las reglas editables y se compilan una sola vez al
+        // final, para que el lote reutilice una instantánea completa.
+        let mut configuracion = Self::configuracion_integrada();
 
         // Combinar exclusiones
-        if !archivo.exclusions.folders.is_empty() {
-            for f in archivo.exclusions.folders {
-                if !reglas.exclusions.folders.contains(&f) {
-                    reglas.exclusions.folders.push(f);
+        if !archivo_usuario.exclusions.folders.is_empty() {
+            for f in archivo_usuario.exclusions.folders {
+                if !configuracion.exclusions.folders.contains(&f) {
+                    configuracion.exclusions.folders.push(f);
                 }
             }
         }
-        if !archivo.exclusions.files.is_empty() {
-            for f in archivo.exclusions.files {
-                if !reglas.exclusions.files.contains(&f) {
-                    reglas.exclusions.files.push(f);
+        if !archivo_usuario.exclusions.files.is_empty() {
+            for f in archivo_usuario.exclusions.files {
+                if !configuracion.exclusions.files.contains(&f) {
+                    configuracion.exclusions.files.push(f);
                 }
             }
         }
 
         // Incorporar clasificaciones de usuario con máxima prioridad
-        if !archivo.classifications.is_empty() {
-            for c in archivo.classifications.into_iter().rev() {
-                reglas.classifications.insert(0, c);
+        if !archivo_usuario.classifications.is_empty() {
+            for c in archivo_usuario.classifications.into_iter().rev() {
+                configuracion.classifications.insert(0, c);
             }
         }
 
         // Incorporar whitelist
-        for e in archivo.whitelist {
+        for e in archivo_usuario.whitelist {
             if !e.patron.trim().is_empty() {
-                reglas.whitelist.push(e);
+                configuracion.whitelist.push(e);
             }
         }
 
         // Incorporar ruido
-        for e in archivo.noise {
+        for e in archivo_usuario.noise {
             if !e.patron.trim().is_empty() {
-                reglas.ruido.push(e);
+                configuracion.noise.push(e);
             }
         }
 
         // Incorporar categorías
-        for c in archivo.categories {
+        for c in archivo_usuario.categories {
             if !c.nombre.trim().is_empty() && !c.patrones.is_empty() {
-                reglas.categorias.push(c);
+                configuracion.categories.push(c);
             }
         }
 
-        Ok(reglas)
+        Ok(Self::desde_configuracion(
+            format!("Archivo: {}", ruta.display()),
+            configuracion,
+        ))
     }
 
     /// Resuelve el conjunto de reglas activo según la ruta provista o el archivo predeterminado.
@@ -921,6 +1026,20 @@ impl ReglasClasificacion {
         }
     }
 
+    /// Determina si una carpeta coincide con las exclusiones ya compiladas.
+    pub(crate) fn es_carpeta_excluida(&self, nombre_o_ruta: &str) -> bool {
+        self.compiladas
+            .exclusiones
+            .es_carpeta_excluida(nombre_o_ruta)
+    }
+
+    /// Determina si un archivo coincide con las exclusiones ya compiladas.
+    pub(crate) fn es_archivo_excluido(&self, nombre_archivo: &str) -> bool {
+        self.compiladas
+            .exclusiones
+            .es_archivo_excluido(nombre_archivo)
+    }
+
     /// Clasifica un programa aplicando la jerarquía de reglas:
     /// 1. Whitelist global (máxima prioridad)
     /// 2. Clasificaciones específicas de software industrial / de usuario
@@ -929,8 +1048,8 @@ impl ReglasClasificacion {
     /// 5. Software no catalogado relevante
     pub fn clasificar(&self, nombre: &str, editor: Option<&str>) -> ResultadoClasificacion {
         // 1. Whitelist global: inclusión prioritaria
-        for e in &self.whitelist {
-            if coincide(nombre, editor, &e.patron, e.editor.as_deref()) {
+        for e in &self.compiladas.whitelist {
+            if e.coincide(nombre, editor) {
                 let (categoria, tags) = self
                     .categoria_de(nombre, editor)
                     .map_or((None, Vec::new()), |(c, t)| (Some(c), t));
@@ -945,18 +1064,18 @@ impl ReglasClasificacion {
         }
 
         // 2. Clasificaciones de software industrial / reglas de usuario
-        for c in &self.classifications {
+        for c in &self.compiladas.clasificaciones {
             let vendor_coincide = match (&c.vendor, editor) {
-                (Some(v), Some(ed)) => coincide_patron(ed, v),
+                (Some(v), Some(ed)) => v.coincide(ed),
                 (Some(_), None) => true,
                 (None, _) => true,
             };
 
             if vendor_coincide {
-                for patron in &c.patterns {
-                    if coincide_patron(nombre, patron) {
+                for patron in &c.patrones {
+                    if patron.coincide(nombre) {
                         let cat = c
-                            .category
+                            .categoria
                             .clone()
                             .unwrap_or_else(|| "Automatización Industrial".to_string());
                         return ResultadoClasificacion {
@@ -965,7 +1084,10 @@ impl ReglasClasificacion {
                             motivo_veredicto: format!(
                                 "Clasificado como «{}» ({}) por regla de software industrial.",
                                 c.software,
-                                c.vendor.as_deref().unwrap_or("Proveedor General")
+                                c.vendor
+                                    .as_ref()
+                                    .map(|vendor| vendor.original())
+                                    .unwrap_or("Proveedor General")
                             ),
                             categoria: Some(cat),
                             tags: c.tags.clone(),
@@ -976,8 +1098,8 @@ impl ReglasClasificacion {
         }
 
         // 3. Ruido del sistema: se descarta del reporte
-        for e in &self.ruido {
-            if coincide(nombre, editor, &e.patron, e.editor.as_deref()) {
+        for e in &self.compiladas.ruido {
+            if e.coincide(nombre, editor) {
                 return ResultadoClasificacion {
                     es_relevante: false,
                     es_whitelist: false,
@@ -1012,10 +1134,10 @@ impl ReglasClasificacion {
     }
 
     /// Localiza la primera categoría cuyos patrones coinciden con el programa.
-    fn categoria_de(&self, nombre: &str, editor: Option<&str>) -> Option<(String, Vec<String>)> {
-        for c in &self.categorias {
+    fn categoria_de(&self, nombre: &str, _editor: Option<&str>) -> Option<(String, Vec<String>)> {
+        for c in &self.compiladas.categorias {
             for patron in &c.patrones {
-                if coincide(nombre, editor, patron, None) {
+                if patron.coincide(nombre) {
                     return Some((c.nombre.clone(), c.tags.clone()));
                 }
             }
@@ -1044,78 +1166,549 @@ fn categoria(nombre: &str, patrones: &[&str], tags: &[&str]) -> CategoriaReglas 
     }
 }
 
-/// Evalúa si un texto coincide con un patrón flexible:
-/// - Expresiones regulares si comienza con `^`, `regex:` o contiene metacaracteres.
-/// - Comodines glob (`*` y `?`).
-/// - Coincidencia de palabra completa o prefijo alfanumérico.
-/// - Contención de subcadena insensible a mayúsculas/minúsculas.
-pub fn coincide_patron(texto: &str, patron: &str) -> bool {
-    let patron_norm = patron.trim();
-    if patron_norm.is_empty() {
-        return false;
+fn compilar_reglas(configuracion: &ReglasArchivo, origen: &str) -> ReglasCompiladas {
+    let (compiladas, diagnosticos) = ReglasCompiladas::compilar(configuracion);
+    for diagnostico in diagnosticos {
+        log::warn!(
+            "[reglas] {origen}: patrón inválido en {} («{}»): {}. Se conserva la coincidencia de respaldo.",
+            diagnostico.contexto,
+            diagnostico.patron,
+            diagnostico.detalle,
+        );
     }
-    let texto_norm = texto.trim();
-    if texto_norm.is_empty() {
-        return false;
-    }
-
-    // 1. Regex explícito
-    if patron_norm.starts_with('^')
-        || patron_norm.ends_with('$')
-        || patron_norm.starts_with("regex:")
-    {
-        let expr = patron_norm.strip_prefix("regex:").unwrap_or(patron_norm);
-        if let Ok(re) = regex::RegexBuilder::new(expr)
-            .case_insensitive(true)
-            .build()
-        {
-            return re.is_match(texto_norm);
-        }
-    }
-
-    // 2. Comodines glob (* y ?)
-    if patron_norm.contains('*') || patron_norm.contains('?') {
-        let mut regex_str = String::from("(?i)^");
-        for c in patron_norm.chars() {
-            match c {
-                '*' => regex_str.push_str(".*"),
-                '?' => regex_str.push('.'),
-                '.' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
-                    regex_str.push('\\');
-                    regex_str.push(c);
-                }
-                other => regex_str.push(other),
-            }
-        }
-        regex_str.push('$');
-        if let Ok(re) = regex::Regex::new(&regex_str) {
-            return re.is_match(texto_norm);
-        }
-    }
-
-    let p_lower = patron_norm.to_lowercase();
-    let t_lower = texto_norm.to_lowercase();
-
-    // 3. Palabra única alfanumérica -> límite de palabra o prefijo largo
-    if p_lower.chars().all(|c| c.is_alphanumeric()) && !p_lower.contains(' ') {
-        return t_lower
-            .split(|c: char| !c.is_alphanumeric())
-            .any(|palabra| {
-                palabra == p_lower || (palabra.starts_with(&p_lower) && p_lower.len() >= 4)
-            });
-    }
-
-    // 4. Subcadena general para patrones compuestos
-    t_lower.contains(&p_lower)
+    compiladas
 }
 
-/// Coincidencia combinada de nombre y editor del software.
-fn coincide(nombre: &str, editor: Option<&str>, patron: &str, patron_editor: Option<&str>) -> bool {
-    if !coincide_patron(nombre, patron) {
-        return false;
+impl ReglasCompiladas {
+    fn compilar(configuracion: &ReglasArchivo) -> (Self, Vec<DiagnosticoPatron>) {
+        let mut diagnosticos = Vec::new();
+        let exclusiones = ExclusionesCompiladas {
+            carpetas: compilar_patrones(
+                &configuracion.exclusions.folders,
+                "exclusions.folders",
+                &mut diagnosticos,
+            ),
+            archivos: compilar_patrones(
+                &configuracion.exclusions.files,
+                "exclusions.files",
+                &mut diagnosticos,
+            ),
+        };
+
+        let mut clasificaciones = Vec::with_capacity(configuracion.classifications.len());
+        for (indice, clasificacion) in configuracion.classifications.iter().enumerate() {
+            let contexto = format!("classifications[{indice}]");
+            clasificaciones.push(ClasificacionSoftwareCompilada {
+                vendor: clasificacion.vendor.as_deref().map(|vendor| {
+                    compilar_patron_en_contexto(
+                        vendor,
+                        format!("{contexto}.vendor"),
+                        &mut diagnosticos,
+                    )
+                }),
+                software: clasificacion.software.clone(),
+                patrones: compilar_patrones(
+                    &clasificacion.patterns,
+                    &format!("{contexto}.patterns"),
+                    &mut diagnosticos,
+                ),
+                categoria: clasificacion.category.clone(),
+                tags: clasificacion.tags.clone(),
+            });
+        }
+
+        let mut whitelist = Vec::with_capacity(configuracion.whitelist.len());
+        for (indice, entrada) in configuracion.whitelist.iter().enumerate() {
+            whitelist.push(EntradaPatronCompilada {
+                patron: compilar_patron_en_contexto(
+                    &entrada.patron,
+                    format!("whitelist[{indice}].patron"),
+                    &mut diagnosticos,
+                ),
+                editor: compilar_editor(
+                    entrada.editor.as_deref(),
+                    format!("whitelist[{indice}].editor"),
+                    &mut diagnosticos,
+                ),
+                motivo: entrada.motivo.clone(),
+            });
+        }
+
+        let mut ruido = Vec::with_capacity(configuracion.noise.len());
+        for (indice, entrada) in configuracion.noise.iter().enumerate() {
+            ruido.push(EntradaPatronCompilada {
+                patron: compilar_patron_en_contexto(
+                    &entrada.patron,
+                    format!("noise[{indice}].patron"),
+                    &mut diagnosticos,
+                ),
+                editor: compilar_editor(
+                    entrada.editor.as_deref(),
+                    format!("noise[{indice}].editor"),
+                    &mut diagnosticos,
+                ),
+                motivo: entrada.motivo.clone(),
+            });
+        }
+
+        let mut categorias = Vec::with_capacity(configuracion.categories.len());
+        for (indice, categoria) in configuracion.categories.iter().enumerate() {
+            categorias.push(CategoriaReglasCompilada {
+                nombre: categoria.nombre.clone(),
+                patrones: compilar_patrones(
+                    &categoria.patrones,
+                    &format!("categories[{indice}].patterns"),
+                    &mut diagnosticos,
+                ),
+                tags: categoria.tags.clone(),
+            });
+        }
+
+        (
+            Self {
+                exclusiones,
+                clasificaciones,
+                whitelist,
+                ruido,
+                categorias,
+            },
+            diagnosticos,
+        )
     }
-    match patron_editor.map(str::trim).filter(|e| !e.is_empty()) {
-        Some(pe) => editor.map(|e| coincide_patron(e, pe)).unwrap_or(true),
-        None => true,
+}
+
+impl ExclusionesCompiladas {
+    fn es_carpeta_excluida(&self, nombre_o_ruta: &str) -> bool {
+        self.carpetas
+            .iter()
+            .any(|patron| patron.coincide(nombre_o_ruta))
+    }
+
+    fn es_archivo_excluido(&self, nombre_archivo: &str) -> bool {
+        self.archivos
+            .iter()
+            .any(|patron| patron.coincide(nombre_archivo))
+    }
+}
+
+impl EntradaPatronCompilada {
+    fn coincide(&self, nombre: &str, editor: Option<&str>) -> bool {
+        if !self.patron.coincide(nombre) {
+            return false;
+        }
+        match &self.editor {
+            Some(patron_editor) => editor
+                .map(|valor| patron_editor.coincide(valor))
+                .unwrap_or(true),
+            None => true,
+        }
+    }
+}
+
+fn compilar_patrones(
+    patrones: &[String],
+    contexto: &str,
+    diagnosticos: &mut Vec<DiagnosticoPatron>,
+) -> Vec<PatronCompilado> {
+    patrones
+        .iter()
+        .enumerate()
+        .map(|(indice, patron)| {
+            compilar_patron_en_contexto(patron, format!("{contexto}[{indice}]"), diagnosticos)
+        })
+        .collect()
+}
+
+fn compilar_editor(
+    editor: Option<&str>,
+    contexto: String,
+    diagnosticos: &mut Vec<DiagnosticoPatron>,
+) -> Option<PatronCompilado> {
+    match editor {
+        Some(editor) if !editor.trim().is_empty() => {
+            Some(compilar_patron_en_contexto(editor, contexto, diagnosticos))
+        }
+        _ => None,
+    }
+}
+
+fn compilar_patron_en_contexto(
+    patron: &str,
+    contexto: String,
+    diagnosticos: &mut Vec<DiagnosticoPatron>,
+) -> PatronCompilado {
+    let (compilado, errores) = PatronCompilado::compilar(patron);
+    for detalle in errores {
+        diagnosticos.push(DiagnosticoPatron {
+            contexto: contexto.clone(),
+            patron: compilado.original().to_string(),
+            detalle,
+        });
+    }
+    compilado
+}
+
+impl PatronCompilado {
+    fn compilar(patron: &str) -> (Self, Vec<String>) {
+        let patron_normalizado = patron.trim();
+        let original = patron.to_string();
+        if patron_normalizado.is_empty() {
+            return (
+                Self {
+                    original,
+                    matcher: MatcherPatron::Vacio,
+                },
+                Vec::new(),
+            );
+        }
+
+        let mut errores = Vec::new();
+        if patron_normalizado.starts_with('^')
+            || patron_normalizado.ends_with('$')
+            || patron_normalizado.starts_with("regex:")
+        {
+            let expresion = patron_normalizado
+                .strip_prefix("regex:")
+                .unwrap_or(patron_normalizado);
+            match regex::RegexBuilder::new(expresion)
+                .case_insensitive(true)
+                .build()
+            {
+                Ok(regex) => {
+                    return (
+                        Self {
+                            original,
+                            matcher: MatcherPatron::Regex(regex),
+                        },
+                        errores,
+                    );
+                }
+                Err(error) => errores.push(format!(
+                    "la expresión regular explícita no se pudo compilar: {error}"
+                )),
+            }
+        }
+
+        if patron_normalizado.contains('*') || patron_normalizado.contains('?') {
+            match regex_desde_comodin(patron_normalizado) {
+                Ok(regex) => {
+                    return (
+                        Self {
+                            original,
+                            matcher: MatcherPatron::Regex(regex),
+                        },
+                        errores,
+                    );
+                }
+                Err(error) => errores.push(format!(
+                    "el patrón con comodines no se pudo compilar: {error}"
+                )),
+            }
+        }
+
+        (
+            Self {
+                original,
+                matcher: matcher_literal(patron_normalizado),
+            },
+            errores,
+        )
+    }
+
+    fn original(&self) -> &str {
+        &self.original
+    }
+
+    fn coincide(&self, texto: &str) -> bool {
+        let texto_normalizado = texto.trim();
+        if texto_normalizado.is_empty() {
+            return false;
+        }
+
+        match &self.matcher {
+            MatcherPatron::Vacio => false,
+            MatcherPatron::Regex(regex) => regex.is_match(texto_normalizado),
+            MatcherPatron::Palabra { normalizado } => {
+                let texto_minusculas = texto_normalizado.to_lowercase();
+                texto_minusculas
+                    .split(|caracter: char| !caracter.is_alphanumeric())
+                    .any(|palabra| {
+                        palabra == normalizado
+                            || (palabra.starts_with(normalizado) && normalizado.len() >= 4)
+                    })
+            }
+            MatcherPatron::Subcadena { normalizado } => {
+                texto_normalizado.to_lowercase().contains(normalizado)
+            }
+        }
+    }
+}
+
+fn matcher_literal(patron_normalizado: &str) -> MatcherPatron {
+    let normalizado = patron_normalizado.to_lowercase();
+    if normalizado
+        .chars()
+        .all(|caracter| caracter.is_alphanumeric())
+        && !normalizado.contains(' ')
+    {
+        MatcherPatron::Palabra { normalizado }
+    } else {
+        MatcherPatron::Subcadena { normalizado }
+    }
+}
+
+fn regex_desde_comodin(patron: &str) -> Result<regex::Regex, regex::Error> {
+    let mut expresion = String::from("(?i)^");
+    for caracter in patron.chars() {
+        match caracter {
+            '*' => expresion.push_str(".*"),
+            '?' => expresion.push('.'),
+            '.' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+                expresion.push('\\');
+                expresion.push(caracter);
+            }
+            otro => expresion.push(otro),
+        }
+    }
+    expresion.push('$');
+    regex::Regex::new(&expresion)
+}
+
+/// Evalúa una coincidencia aislada con la misma semántica flexible de reglas.
+///
+/// Las reglas cargadas usan `PatronCompilado` y no pasan por esta compilación
+/// por consulta; esta función se conserva para los consumidores de la API de
+/// patrón individual.
+pub fn coincide_patron(texto: &str, patron: &str) -> bool {
+    let (compilado, _) = PatronCompilado::compilar(patron);
+    compilado.coincide(texto)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn coincide_patron_anterior(texto: &str, patron: &str) -> bool {
+        let patron_normalizado = patron.trim();
+        if patron_normalizado.is_empty() {
+            return false;
+        }
+        let texto_normalizado = texto.trim();
+        if texto_normalizado.is_empty() {
+            return false;
+        }
+
+        if patron_normalizado.starts_with('^')
+            || patron_normalizado.ends_with('$')
+            || patron_normalizado.starts_with("regex:")
+        {
+            let expresion = patron_normalizado
+                .strip_prefix("regex:")
+                .unwrap_or(patron_normalizado);
+            if let Ok(regex) = regex::RegexBuilder::new(expresion)
+                .case_insensitive(true)
+                .build()
+            {
+                return regex.is_match(texto_normalizado);
+            }
+        }
+
+        if patron_normalizado.contains('*') || patron_normalizado.contains('?') {
+            let mut expresion = String::from("(?i)^");
+            for caracter in patron_normalizado.chars() {
+                match caracter {
+                    '*' => expresion.push_str(".*"),
+                    '?' => expresion.push('.'),
+                    '.' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+                        expresion.push('\\');
+                        expresion.push(caracter);
+                    }
+                    otro => expresion.push(otro),
+                }
+            }
+            expresion.push('$');
+            if let Ok(regex) = regex::Regex::new(&expresion) {
+                return regex.is_match(texto_normalizado);
+            }
+        }
+
+        let patron_minusculas = patron_normalizado.to_lowercase();
+        let texto_minusculas = texto_normalizado.to_lowercase();
+        if patron_minusculas
+            .chars()
+            .all(|caracter| caracter.is_alphanumeric())
+            && !patron_minusculas.contains(' ')
+        {
+            return texto_minusculas
+                .split(|caracter: char| !caracter.is_alphanumeric())
+                .any(|palabra| {
+                    palabra == patron_minusculas
+                        || (palabra.starts_with(&patron_minusculas) && patron_minusculas.len() >= 4)
+                });
+        }
+
+        texto_minusculas.contains(&patron_minusculas)
+    }
+
+    #[test]
+    fn patrones_compilados_mantienen_literales_y_comodines() {
+        let casos = [
+            ("VM Inventory v1.2+beta", "v1.2+beta", true),
+            ("snapshot.tar.gz", "*.tar.gz", true),
+            ("snapshot.tar.gza", "*.tar.gz", false),
+            ("file7.tmp", "file?.tmp", true),
+            ("file77.tmp", "file?.tmp", false),
+            ("release v1.2+beta", "*v1.2+beta*", true),
+            ("release v1x22beta", "*v1.2+beta*", false),
+        ];
+
+        for (texto, patron, esperado) in casos {
+            let (compilado, diagnosticos) = PatronCompilado::compilar(patron);
+            assert!(
+                diagnosticos.is_empty(),
+                "diagnóstico inesperado para {patron}"
+            );
+            assert_eq!(compilado.coincide(texto), esperado, "patrón {patron}");
+        }
+
+        let (literal, _) = PatronCompilado::compilar("v1.2+beta");
+        assert!(matches!(literal.matcher, MatcherPatron::Subcadena { .. }));
+
+        let (glob, _) = PatronCompilado::compilar("*v1.2+beta*");
+        assert!(matches!(glob.matcher, MatcherPatron::Regex(_)));
+
+        let patron_especial = r"* [a].(b)+{c}|^$\*";
+        let (especial, diagnosticos) = PatronCompilado::compilar(patron_especial);
+        assert!(diagnosticos.is_empty());
+        assert!(especial.coincide(r"release [a].(b)+{c}|^$\tail"));
+        assert!(!especial.coincide("release axbcccc"));
+    }
+
+    #[test]
+    fn matcher_compilado_equivale_al_motor_anterior() {
+        let casos = [
+            (" Example Agent ", "*agent"),
+            ("release-42", r"^release-\d+$"),
+            ("release-x", r"regex:^release-\d+$"),
+            ("Digital Assistant", "git"),
+            ("snapshot.tar.gz", "*.tar.gz"),
+            ("file7.tmp", "file?.tmp"),
+            ("regex:[", "regex:["),
+            ("regex:[resultado", "regex:[*"),
+            ("", "*"),
+            ("programa", "   "),
+        ];
+
+        for (texto, patron) in casos {
+            let (compilado, _) = PatronCompilado::compilar(patron);
+            assert_eq!(
+                compilado.coincide(texto),
+                coincide_patron_anterior(texto, patron),
+                "el patrón {patron:?} debe conservar el comportamiento anterior"
+            );
+        }
+    }
+
+    #[test]
+    fn identifica_regex_invalidas_al_compilar_la_configuracion() {
+        let configuracion = ReglasArchivo {
+            exclusions: ExclusionesConfig::default(),
+            classifications: Vec::new(),
+            whitelist: vec![EntradaPatron {
+                patron: "regex:[".to_string(),
+                editor: None,
+                motivo: "fixture".to_string(),
+            }],
+            noise: Vec::new(),
+            categories: Vec::new(),
+        };
+
+        let (_, diagnosticos) = ReglasCompiladas::compilar(&configuracion);
+        assert_eq!(diagnosticos.len(), 1);
+        assert_eq!(diagnosticos[0].contexto, "whitelist[0].patron");
+        assert_eq!(diagnosticos[0].patron, "regex:[");
+        assert!(diagnosticos[0]
+            .detalle
+            .contains("expresión regular explícita"));
+
+        let (compilado, errores) = PatronCompilado::compilar("regex:[");
+        assert_eq!(errores.len(), 1);
+        assert_eq!(compilado.original(), "regex:[");
+        assert!(compilado.coincide("regex:["));
+    }
+
+    fn reglas_de_precedencia(
+        incluir_whitelist: bool,
+        incluir_especifica: bool,
+        incluir_ruido: bool,
+    ) -> ReglasClasificacion {
+        ReglasClasificacion::desde_configuracion(
+            "fixture de precedencia",
+            ReglasArchivo {
+                exclusions: ExclusionesConfig::default(),
+                classifications: if incluir_especifica {
+                    vec![ClasificacionSoftware {
+                        vendor: None,
+                        software: "Herramienta específica".to_string(),
+                        patterns: vec!["Herramienta de prueba".to_string()],
+                        category: Some("Específica".to_string()),
+                        tags: vec!["especifica".to_string()],
+                    }]
+                } else {
+                    Vec::new()
+                },
+                whitelist: if incluir_whitelist {
+                    vec![EntradaPatron {
+                        patron: "Herramienta de prueba".to_string(),
+                        editor: None,
+                        motivo: "prioridad máxima".to_string(),
+                    }]
+                } else {
+                    Vec::new()
+                },
+                noise: if incluir_ruido {
+                    vec![EntradaPatron {
+                        patron: "Herramienta de prueba".to_string(),
+                        editor: None,
+                        motivo: "ruido".to_string(),
+                    }]
+                } else {
+                    Vec::new()
+                },
+                categories: vec![CategoriaReglas {
+                    nombre: "Temática".to_string(),
+                    patrones: vec!["Herramienta de prueba".to_string()],
+                    tags: vec!["tematica".to_string()],
+                }],
+            },
+        )
+    }
+
+    #[test]
+    fn conserva_la_precedencia_de_clasificacion() {
+        let nombre = "Herramienta de prueba";
+
+        let resultado = reglas_de_precedencia(true, true, true).clasificar(nombre, None);
+        assert!(resultado.es_relevante);
+        assert!(resultado.es_whitelist);
+        assert_eq!(resultado.categoria.as_deref(), Some("Temática"));
+        assert_eq!(resultado.tags, vec!["tematica"]);
+
+        let resultado = reglas_de_precedencia(false, true, true).clasificar(nombre, None);
+        assert!(resultado.es_relevante);
+        assert!(!resultado.es_whitelist);
+        assert_eq!(resultado.categoria.as_deref(), Some("Específica"));
+        assert_eq!(resultado.tags, vec!["especifica"]);
+
+        let resultado = reglas_de_precedencia(false, false, true).clasificar(nombre, None);
+        assert!(!resultado.es_relevante);
+        assert!(!resultado.es_whitelist);
+        assert_eq!(resultado.categoria, None);
+
+        let resultado = reglas_de_precedencia(false, false, false).clasificar(nombre, None);
+        assert!(resultado.es_relevante);
+        assert!(!resultado.es_whitelist);
+        assert_eq!(resultado.categoria.as_deref(), Some("Temática"));
+        assert_eq!(resultado.tags, vec!["tematica"]);
     }
 }

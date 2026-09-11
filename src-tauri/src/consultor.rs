@@ -1,20 +1,13 @@
 //! # Módulo Consultor de Software e Inventario de VMs
 //!
-//! Aísla y centraliza toda la lógica de indexación, consulta, autocompletado y
-//! filtrado de software en máquinas virtuales sobre archivos de reporte JSON.
-//!
-//! Filtros soportados:
-//! - Programa / Aplicación
-//! - Versión del programa
-//! - Máquina virtual (nombre, nombre interno, ruta)
-//! - Tipo de posesión / Ubicación (Personas, Discos, Servidores)
-//! - Propietario / Asignado / Elemento
+//! Indexa reportes JSON contenidos en las subcarpetas directas de la carpeta de
+//! inventario. Cada subcarpeta legible define dinámicamente un tipo.
 
 use crate::models::{
     BdRelevamiento, CoincidenciaSoftware, InformeDirecto, ProgramaClasificado, RegistroVM,
     ResultadoConsultaSoftware,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// Criterios de filtrado normalizados para la consulta de software.
@@ -24,17 +17,16 @@ pub struct FiltrosConsultor {
     pub version: Option<String>,
     pub vm: Option<String>,
     pub tipo: Option<String>,
-    pub propietario: Option<String>,
+    pub responsable: Option<String>,
 }
 
 impl FiltrosConsultor {
-    /// Construye una nueva instancia normalizando las cadenas (minúsculas, trim, descarte de centinelas).
     pub fn nuevo(
         programa: Option<String>,
         version: Option<String>,
         vm: Option<String>,
         tipo: Option<String>,
-        propietario: Option<String>,
+        responsable: Option<String>,
     ) -> Self {
         let limpiar = |v: Option<String>| {
             v.map(|s| s.trim().to_lowercase()).filter(|s| {
@@ -52,22 +44,19 @@ impl FiltrosConsultor {
             version: limpiar(version),
             vm: limpiar(vm),
             tipo: limpiar(tipo),
-            propietario: limpiar(propietario),
+            responsable: limpiar(responsable),
         }
     }
 
-    /// Indica si al menos un filtro de búsqueda está activo.
     pub fn hay_filtros_activos(&self) -> bool {
         self.programa.is_some()
             || self.version.is_some()
             || self.vm.is_some()
             || self.tipo.is_some()
-            || self.propietario.is_some()
+            || self.responsable.is_some()
     }
 
-    /// Evalúa si una máquina virtual cumple con los filtros a nivel de VM (VM, Tipo y Propietario).
     pub fn cumple_vm(&self, vm: &RegistroVM) -> bool {
-        // 1. Filtro por Máquina Virtual
         if let Some(patron) = &self.vm {
             let carpeta_ok = texto_coincide(&vm.nombre_vm, patron);
             let interno_ok = texto_opcion_coincide(vm.nombre_interno.as_deref(), patron);
@@ -77,22 +66,14 @@ impl FiltrosConsultor {
             }
         }
 
-        // 2. Filtro por Tipo / Ubicación
         if let Some(tipo_filtro) = &self.tipo {
-            let tipo_ok = texto_opcion_coincide(vm.tipo_posesion.as_deref(), tipo_filtro)
-                || texto_opcion_coincide(vm.origen_categoria.as_deref(), tipo_filtro);
-            if !tipo_ok {
+            if !texto_opcion_coincide(vm.tipo.as_deref(), tipo_filtro) {
                 return false;
             }
         }
 
-        // 3. Filtro por Propietario / Asignado / Elemento
-        if let Some(prop_filtro) = &self.propietario {
-            let prop_ok = texto_opcion_coincide(vm.propietario.as_deref(), prop_filtro)
-                || texto_opcion_coincide(vm.elemento_asignado.as_deref(), prop_filtro)
-                || texto_opcion_coincide(vm.asignado.as_deref(), prop_filtro)
-                || texto_opcion_coincide(vm.elemento.as_deref(), prop_filtro);
-            if !prop_ok {
+        if let Some(responsable_filtro) = &self.responsable {
+            if !texto_opcion_coincide(vm.responsable.as_deref(), responsable_filtro) {
                 return false;
             }
         }
@@ -100,7 +81,6 @@ impl FiltrosConsultor {
         true
     }
 
-    /// Evalúa si un programa cumple con el filtro de Programa (nombre, editor o tags).
     pub fn cumple_programa(&self, programa: &ProgramaClasificado) -> bool {
         if let Some(patron) = &self.programa {
             let nombre_ok = texto_coincide(&programa.nombre, patron);
@@ -113,24 +93,18 @@ impl FiltrosConsultor {
         true
     }
 
-    /// Evalúa si un programa cumple con el filtro de Versión.
     pub fn cumple_version(&self, programa: &ProgramaClasificado) -> bool {
-        if let Some(patron) = &self.version {
-            if !texto_opcion_coincide(programa.version.as_deref(), patron) {
-                return false;
-            }
-        }
-        true
+        self.version
+            .as_deref()
+            .map(|patron| texto_opcion_coincide(programa.version.as_deref(), patron))
+            .unwrap_or(true)
     }
 
-    /// Evalúa si el par (VM, Programa) satisface todos los criterios activos.
     pub fn cumple(&self, vm: &RegistroVM, programa: &ProgramaClasificado) -> bool {
         self.cumple_vm(vm) && self.cumple_programa(programa) && self.cumple_version(programa)
     }
 }
 
-/// Comprueba si un texto coincide con un patrón de búsqueda de forma insensible a mayúsculas,
-/// soportando coincidencias tanto con espacios como con guiones bajos.
 pub fn texto_coincide(valor: &str, patron: &str) -> bool {
     let v_low = valor.trim().to_lowercase();
     let p_low = patron.trim().to_lowercase();
@@ -145,12 +119,16 @@ pub fn texto_coincide(valor: &str, patron: &str) -> bool {
         || v_espacios.contains(&p_espacios)
 }
 
-/// Comprueba si una opción de texto coincide con el patrón.
 pub fn texto_opcion_coincide(valor: Option<&str>, patron: &str) -> bool {
     valor.map(|v| texto_coincide(v, patron)).unwrap_or(false)
 }
 
-/// Sanitiza una cadena opcional eliminando cadenas vacías, "-", "null", "undefined".
+pub fn responsable_desde_archivo(ruta: &Path) -> Option<String> {
+    let nombre = ruta.file_stem()?.to_string_lossy();
+    let responsable = nombre.replace('_', " ").trim().to_string();
+    (!responsable.is_empty()).then_some(responsable)
+}
+
 pub fn sanitizar_opcion(val: Option<&str>) -> Option<String> {
     let s = val?.trim();
     if s.is_empty()
@@ -164,155 +142,156 @@ pub fn sanitizar_opcion(val: Option<&str>) -> Option<String> {
     }
 }
 
-/// Deducir nombre de entidad legible a partir del nombre o stem del archivo de reporte.
-pub fn deducir_nombre_entidad_desde_archivo(stem: &str) -> Option<String> {
-    let s = stem.trim();
-    if s.is_empty()
-        || s.eq_ignore_ascii_case("reporte")
-        || s.eq_ignore_ascii_case("informe")
-        || s.eq_ignore_ascii_case("vms")
-        || s.eq_ignore_ascii_case("inventario")
-    {
-        None
-    } else {
-        let con_espacios = s.replace('_', " ");
-        Some(con_espacios.trim().to_string())
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ArchivoReporteInfo {
     pub ruta: PathBuf,
-    pub categoria_inferida: Option<String>,
-    pub subcarpeta_nombre: Option<String>,
+    pub tipo: String,
 }
 
-/// Normaliza una cadena de categoría a uno de los 3 valores canónicos: "Personas", "Discos", "Servidores".
-pub fn normalizar_categoria_origen(texto: &str) -> String {
-    let lower = texto.to_lowercase();
-    if lower.contains("serv") {
-        "Servidores".to_string()
-    } else if lower.contains("disco") || lower.contains("disk") {
-        "Discos".to_string()
-    } else {
-        "Personas".to_string()
+#[derive(Clone, Debug)]
+struct TipoInventario {
+    nombre: String,
+    ruta: PathBuf,
+}
+
+/// Detecta los tipos desde las carpetas directas legibles del inventario.
+///
+/// Las carpetas vacías se exponen como tipos sin registros. Los archivos y las
+/// carpetas inaccesibles se omiten. Si el sistema permite nombres que solo se
+/// diferencian por mayúsculas/minúsculas, se conserva una única carpeta (la
+/// primera por orden alfabético insensible a mayúsculas). Los JSON ubicados en
+/// la raíz no se indexan: no pertenecen a ningún tipo.
+fn detectar_tipos_inventario(directorio_raiz: &Path) -> Result<Vec<TipoInventario>, String> {
+    let entradas = std::fs::read_dir(directorio_raiz).map_err(|e| {
+        format!(
+            "No se puede leer la carpeta de inventario ({}): {e}",
+            directorio_raiz.display()
+        )
+    })?;
+    let mut candidatas: Vec<(String, PathBuf)> = entradas
+        .flatten()
+        .filter_map(|entrada| {
+            let ruta = entrada.path();
+            if !ruta.is_dir() {
+                return None;
+            }
+            let nombre = ruta.file_name()?.to_str()?.trim().to_string();
+            (!nombre.is_empty()).then_some((nombre, ruta))
+        })
+        .collect();
+    candidatas.sort_by(|a, b| {
+        a.0.to_lowercase()
+            .cmp(&b.0.to_lowercase())
+            .then_with(|| a.0.cmp(&b.0))
+    });
+
+    let mut tipos = BTreeMap::new();
+    for (nombre, ruta) in candidatas {
+        // Abrir la carpeta aquí permite distinguir una carpeta vacía de una
+        // carpeta a la que no se puede acceder.
+        if std::fs::read_dir(&ruta).is_ok() {
+            tipos
+                .entry(nombre.to_lowercase())
+                .or_insert(TipoInventario { nombre, ruta });
+        }
     }
+    Ok(tipos.into_values().collect())
 }
 
-/// Recorre recursivamente un directorio raíz identificando subcarpetas `Personas/`, `Discos/`, `Servidores/`
-/// y recolectando todos los archivos `.json` con su categoría asignada.
-pub fn recolectar_archivos_json(directorio_raiz: &Path) -> Vec<ArchivoReporteInfo> {
-    let mut resultado = Vec::new();
-    let mut stack: Vec<(PathBuf, Option<String>, Option<String>)> =
-        vec![(directorio_raiz.to_path_buf(), None, None)];
-
-    while let Some((dir_actual, cat_heredada, sub_heredada)) = stack.pop() {
-        let entradas = match std::fs::read_dir(&dir_actual) {
-            Ok(e) => e,
+/// Recolecta JSON recursivamente, sin cruzar los límites de cada tipo directo.
+fn recolectar_json_en_tipo(directorio: &Path, tipo: &str, resultado: &mut Vec<ArchivoReporteInfo>) {
+    let mut stack = vec![directorio.to_path_buf()];
+    while let Some(actual) = stack.pop() {
+        let entradas = match std::fs::read_dir(&actual) {
+            Ok(entradas) => entradas,
             Err(_) => continue,
         };
-
         for entrada in entradas.flatten() {
-            let path = entrada.path();
-            let file_name = match path.file_name().and_then(|n| n.to_str()) {
-                Some(n) => n.to_string(),
-                None => continue,
-            };
-
-            if path.is_dir() {
-                let name_lower = file_name.to_lowercase();
-                let (nueva_cat, nueva_sub) = match cat_heredada.as_deref() {
-                    Some("Personas") | Some("Discos") | Some("Servidores") => {
-                        let sub = sub_heredada.clone().or(Some(file_name.clone()));
-                        (cat_heredada.clone(), sub)
-                    }
-                    _ => {
-                        if name_lower == "personas" || name_lower.contains("persona") {
-                            (Some("Personas".to_string()), None)
-                        } else if name_lower == "discos"
-                            || name_lower.contains("disco")
-                            || name_lower.contains("disk")
-                        {
-                            (Some("Discos".to_string()), None)
-                        } else if name_lower == "servidores"
-                            || name_lower.contains("servidor")
-                            || name_lower.contains("server")
-                        {
-                            (Some("Servidores".to_string()), None)
-                        } else {
-                            (None, None)
-                        }
-                    }
-                };
-                stack.push((path, nueva_cat, nueva_sub));
-            } else if path.is_file() {
-                let es_json = path
+            let ruta = entrada.path();
+            if ruta.is_dir() {
+                stack.push(ruta);
+            } else if ruta.is_file()
+                && ruta
                     .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e.eq_ignore_ascii_case("json"))
-                    .unwrap_or(false);
-                if es_json {
-                    let cat = cat_heredada.clone().or_else(|| {
-                        let ruta_str = path.to_string_lossy().to_lowercase();
-                        if ruta_str.contains("serv") {
-                            Some("Servidores".to_string())
-                        } else if ruta_str.contains("disco") || ruta_str.contains("disk") {
-                            Some("Discos".to_string())
-                        } else if ruta_str.contains("persona") {
-                            Some("Personas".to_string())
-                        } else {
-                            None
-                        }
-                    });
-                    resultado.push(ArchivoReporteInfo {
-                        ruta: path,
-                        categoria_inferida: cat,
-                        subcarpeta_nombre: sub_heredada.clone(),
-                    });
-                }
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+            {
+                resultado.push(ArchivoReporteInfo {
+                    ruta,
+                    tipo: tipo.to_string(),
+                });
             }
         }
     }
-
-    resultado.sort_by(|a, b| a.ruta.cmp(&b.ruta));
-    resultado
 }
 
-/// Ejecuta la consulta de software sobre el directorio de reportes JSON y devuelve
-/// totales, opciones de autocompletado y coincidencias filtradas.
+pub fn recolectar_archivos_json(directorio_raiz: &Path) -> Result<Vec<ArchivoReporteInfo>, String> {
+    let tipos = detectar_tipos_inventario(directorio_raiz)?;
+    let mut resultado = Vec::new();
+    for tipo in tipos {
+        recolectar_json_en_tipo(&tipo.ruta, &tipo.nombre, &mut resultado);
+    }
+    resultado.sort_by(|a, b| a.ruta.cmp(&b.ruta));
+    Ok(resultado)
+}
+
 pub fn consultar_software_inventario(
     directorio: &str,
     filtro_programa: Option<String>,
     filtro_version: Option<String>,
     filtro_vm: Option<String>,
     filtro_tipo: Option<String>,
-    filtro_propietario: Option<String>,
+    filtro_responsable: Option<String>,
+) -> Result<ResultadoConsultaSoftware, String> {
+    consultar_software_inventario_con_limite(
+        directorio,
+        filtro_programa,
+        filtro_version,
+        filtro_vm,
+        filtro_tipo,
+        filtro_responsable,
+        30,
+    )
+}
+
+pub fn consultar_software_inventario_con_limite(
+    directorio: &str,
+    filtro_programa: Option<String>,
+    filtro_version: Option<String>,
+    filtro_vm: Option<String>,
+    filtro_tipo: Option<String>,
+    filtro_responsable: Option<String>,
+    limite_coincidencias: usize,
 ) -> Result<ResultadoConsultaSoftware, String> {
     let ruta = Path::new(directorio);
     if !ruta.is_dir() {
-        return Err("El directorio especificado no existe".to_string());
+        return Err("La carpeta de inventario no existe".to_string());
     }
 
-    let archivos_info = recolectar_archivos_json(ruta);
+    let tipos_inventario = detectar_tipos_inventario(ruta)?;
+    let mut archivos_info = Vec::new();
+    for tipo in &tipos_inventario {
+        recolectar_json_en_tipo(&tipo.ruta, &tipo.nombre, &mut archivos_info);
+    }
+    archivos_info.sort_by(|a, b| a.ruta.cmp(&b.ruta));
+
     let filtros = FiltrosConsultor::nuevo(
         filtro_programa,
         filtro_version,
         filtro_vm,
         filtro_tipo,
-        filtro_propietario,
+        filtro_responsable,
     );
     let hay_filtros = filtros.hay_filtros_activos();
+    let limite_coincidencias = limite_coincidencias.clamp(10, 100);
 
-    let mut coincidencias: Vec<CoincidenciaSoftware> = Vec::new();
-    let mut programas: BTreeSet<String> = BTreeSet::new();
-    let mut vms: BTreeSet<String> = BTreeSet::new();
-    let mut versiones: BTreeSet<String> = BTreeSet::new();
-    let mut propietarios: BTreeSet<String> = BTreeSet::new();
-    let mut asignados: BTreeSet<String> = BTreeSet::new();
-    let mut elementos: BTreeSet<String> = BTreeSet::new();
-    let mut tipos: BTreeSet<String> = BTreeSet::new();
-    let mut categorias: BTreeSet<String> = BTreeSet::new();
-    let mut tags: BTreeSet<String> = BTreeSet::new();
+    let mut coincidencias = Vec::new();
+    let mut programas = BTreeSet::new();
+    let mut vms = BTreeSet::new();
+    let mut versiones = BTreeSet::new();
+    let mut responsables = BTreeSet::new();
+    let mut categorias = BTreeSet::new();
+    let mut tags = BTreeSet::new();
     let mut total_vms_escaneadas = 0usize;
     let mut total_programas_indexados = 0usize;
 
@@ -320,58 +299,48 @@ pub fn consultar_software_inventario(
         let nombre_archivo = archivo_info
             .ruta
             .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let stem_archivo = archivo_info
-            .ruta
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
+            .map(|nombre| nombre.to_string_lossy().to_string())
             .unwrap_or_default();
         let contenido = match std::fs::read_to_string(&archivo_info.ruta) {
-            Ok(c) => c,
+            Ok(contenido) => contenido,
             Err(_) => continue,
         };
 
         let lista_vms: Vec<RegistroVM> =
             if let Ok(bd) = serde_json::from_str::<BdRelevamiento>(&contenido) {
                 bd.vms
-            } else if let Ok(vms_arr) = serde_json::from_str::<Vec<RegistroVM>>(&contenido) {
-                vms_arr
-            } else if let Ok(single_vm) = serde_json::from_str::<RegistroVM>(&contenido) {
-                vec![single_vm]
-            } else if let Ok(direct_info) = serde_json::from_str::<InformeDirecto>(&contenido) {
-                let vm_name = Path::new(&direct_info.archivo)
+            } else if let Ok(vms) = serde_json::from_str::<Vec<RegistroVM>>(&contenido) {
+                vms
+            } else if let Ok(vm) = serde_json::from_str::<RegistroVM>(&contenido) {
+                vec![vm]
+            } else if let Ok(informe) = serde_json::from_str::<InformeDirecto>(&contenido) {
+                let nombre_vm = Path::new(&informe.archivo)
                     .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "VM Inspeccionada".to_string());
-                let ruta_dir = Path::new(&direct_info.archivo)
+                    .map(|nombre| nombre.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "VM inspeccionada".to_string());
+                let ruta_carpeta = Path::new(&informe.archivo)
                     .parent()
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_else(|| direct_info.archivo.clone());
-                let os_nombre = if !direct_info.vm_info.os_nombre.is_empty() {
-                    direct_info.vm_info.os_nombre.clone()
-                } else {
-                    direct_info.sistema_operativo.clone()
-                };
+                    .map(|ruta| ruta.to_string_lossy().to_string())
+                    .unwrap_or_else(|| informe.archivo.clone());
                 vec![RegistroVM {
-                    exitosa: direct_info.exito,
-                    nombre_vm: vm_name.clone(),
-                    nombre_interno: Some(vm_name),
-                    ruta_carpeta: ruta_dir,
-                    propietario: None,
-                    tipo_posesion: archivo_info.categoria_inferida.clone(),
-                    elemento_asignado: None,
-                    origen_categoria: archivo_info.categoria_inferida.clone(),
-                    asignado: None,
-                    elemento: None,
-                    sistema_operativo: os_nombre,
-                    hipervisor: Some(direct_info.imagen.hipervisor),
-                    peso_gb: direct_info.imagen.tamano_real as f64 / (1024.0 * 1024.0 * 1024.0),
+                    exitosa: informe.exito,
+                    nombre_vm: nombre_vm.clone(),
+                    nombre_interno: Some(nombre_vm),
+                    ruta_carpeta,
+                    responsable: None,
+                    tipo: Some(archivo_info.tipo.clone()),
+                    sistema_operativo: if informe.vm_info.os_nombre.is_empty() {
+                        informe.sistema_operativo
+                    } else {
+                        informe.vm_info.os_nombre
+                    },
+                    hipervisor: Some(informe.imagen.hipervisor),
+                    peso_gb: informe.imagen.tamano_real as f64 / (1024.0 * 1024.0 * 1024.0),
                     discrepante: false,
-                    observaciones: direct_info.advertencias,
+                    observaciones: informe.advertencias,
                     fecha_relevamiento: String::new(),
-                    programas: direct_info.programas,
-                    peso_bytes: direct_info.imagen.tamano_real,
+                    programas: informe.programas,
+                    peso_bytes: informe.imagen.tamano_real,
                 }]
             } else {
                 continue;
@@ -379,110 +348,48 @@ pub fn consultar_software_inventario(
 
         total_vms_escaneadas += lista_vms.len();
         for mut vm in lista_vms {
-            let cat_raw = vm
-                .origen_categoria
-                .as_deref()
-                .or(archivo_info.categoria_inferida.as_deref())
-                .or(vm.tipo_posesion.as_deref())
-                .unwrap_or("Personas");
-            let cat_normalizada = normalizar_categoria_origen(cat_raw);
-            vm.origen_categoria = Some(cat_normalizada.clone());
-            vm.tipo_posesion = Some(cat_normalizada.clone());
+            // El tipo persistido se ignora deliberadamente: la ubicación actual
+            // del reporte dentro del inventario es la fuente de verdad.
+            vm.tipo = Some(archivo_info.tipo.clone());
+            // El nombre del reporte es la fuente de verdad del responsable;
+            // así el filtro, las sugerencias y las tarjetas comparten el mismo valor.
+            vm.responsable = responsable_desde_archivo(&archivo_info.ruta);
 
-            let entidad_archivo = deducir_nombre_entidad_desde_archivo(&stem_archivo);
-
-            if cat_normalizada == "Personas" {
-                let asig = sanitizar_opcion(vm.asignado.as_deref())
-                    .or_else(|| sanitizar_opcion(vm.propietario.as_deref()))
-                    .or_else(|| sanitizar_opcion(vm.elemento_asignado.as_deref()))
-                    .or_else(|| sanitizar_opcion(archivo_info.subcarpeta_nombre.as_deref()))
-                    .or_else(|| entidad_archivo.clone());
-                vm.asignado = asig.clone();
-                if vm.propietario.is_none() {
-                    vm.propietario = asig.clone();
-                }
-                if vm.elemento_asignado.is_none() {
-                    vm.elemento_asignado = asig.clone();
-                }
-                if let Some(a) = &asig {
-                    asignados.insert(a.clone());
-                    propietarios.insert(a.clone());
-                }
-            } else {
-                let elem = sanitizar_opcion(vm.elemento.as_deref())
-                    .or_else(|| sanitizar_opcion(vm.elemento_asignado.as_deref()))
-                    .or_else(|| sanitizar_opcion(vm.propietario.as_deref()))
-                    .or_else(|| sanitizar_opcion(archivo_info.subcarpeta_nombre.as_deref()))
-                    .or_else(|| entidad_archivo.clone());
-                vm.elemento = elem.clone();
-                if vm.elemento_asignado.is_none() {
-                    vm.elemento_asignado = elem.clone();
-                }
-                if vm.propietario.is_none() {
-                    vm.propietario = elem.clone();
-                }
-                if let Some(e) = &elem {
-                    elementos.insert(e.clone());
-                    propietarios.insert(e.clone());
-                }
+            if let Some(nombre) = sanitizar_opcion(Some(&vm.nombre_vm)) {
+                vms.insert(nombre);
+            }
+            if let Some(responsable) = &vm.responsable {
+                responsables.insert(responsable.clone());
             }
 
-            if let Some(nom_vm) = sanitizar_opcion(Some(&vm.nombre_vm)) {
-                vms.insert(nom_vm);
-            }
-            tipos.insert(cat_normalizada.clone());
-
-            if let Some(p) = sanitizar_opcion(vm.propietario.as_deref()) {
-                propietarios.insert(p);
-            }
-            if let Some(ea) = sanitizar_opcion(vm.elemento_asignado.as_deref()) {
-                propietarios.insert(ea);
-            }
-
-            // ¿Cumple la VM con los filtros a nivel de VM (VM, Tipo, Propietario)?
             let vm_cumple_filtros = filtros.cumple_vm(&vm);
-
             for programa in &vm.programas {
                 total_programas_indexados += 1;
-
-                if let Some(np) = sanitizar_opcion(Some(&programa.nombre)) {
-                    programas.insert(np);
+                if let Some(nombre) = sanitizar_opcion(Some(&programa.nombre)) {
+                    programas.insert(nombre);
                 }
-                if let Some(c) = sanitizar_opcion(programa.categoria.as_deref()) {
-                    categorias.insert(c);
+                if let Some(categoria) = sanitizar_opcion(programa.categoria.as_deref()) {
+                    categorias.insert(categoria);
                 }
-                for t in &programa.tags {
-                    if let Some(tag_limpio) = sanitizar_opcion(Some(t)) {
-                        tags.insert(tag_limpio);
+                for tag in &programa.tags {
+                    if let Some(tag) = sanitizar_opcion(Some(tag)) {
+                        tags.insert(tag);
                     }
                 }
 
-                // ====================================================================
-                // AUTOCOMPLETADO DE VERSIONES AISLADO:
-                // Si el usuario filtró por una app (programa), solo incluimos en
-                // `versiones_disponibles` las versiones correspondientes a esa app.
-                // ====================================================================
                 let programa_coincide = filtros.cumple_programa(programa);
-                if let Some(v) = sanitizar_opcion(programa.version.as_deref()) {
-                    if filtros.programa.is_some() {
-                        // Si hay filtro de programa, solo agregar versiones de esa app
-                        if programa_coincide && vm_cumple_filtros {
-                            versiones.insert(v);
-                        }
-                    } else if vm_cumple_filtros {
-                        // Si no hay filtro de programa pero hay filtro de VM/propietario/tipo
-                        versiones.insert(v);
-                    } else if !hay_filtros {
-                        // Sin filtros activos, mostrar todas las versiones
-                        versiones.insert(v);
+                if let Some(version) = sanitizar_opcion(programa.version.as_deref()) {
+                    if (filtros.programa.is_some() && programa_coincide && vm_cumple_filtros)
+                        || (filtros.programa.is_none() && vm_cumple_filtros)
+                        || !hay_filtros
+                    {
+                        versiones.insert(version);
                     }
                 }
 
-                // Coincidencia para la lista de resultados
                 if hay_filtros
-                    && vm_cumple_filtros
-                    && programa_coincide
-                    && filtros.cumple_version(programa)
+                    && filtros.cumple(&vm, programa)
+                    && coincidencias.len() < limite_coincidencias
                 {
                     coincidencias.push(CoincidenciaSoftware {
                         nombre_programa: programa.nombre.clone(),
@@ -493,12 +400,8 @@ pub fn consultar_software_inventario(
                         nombre_vm: vm.nombre_vm.clone(),
                         nombre_interno: sanitizar_opcion(vm.nombre_interno.as_deref()),
                         ruta_carpeta: vm.ruta_carpeta.clone(),
-                        propietario: sanitizar_opcion(vm.propietario.as_deref()),
-                        tipo_posesion: Some(cat_normalizada.clone()),
-                        elemento_asignado: sanitizar_opcion(vm.elemento_asignado.as_deref()),
-                        origen_categoria: Some(cat_normalizada.clone()),
-                        asignado: sanitizar_opcion(vm.asignado.as_deref()),
-                        elemento: sanitizar_opcion(vm.elemento.as_deref()),
+                        responsable: vm.responsable.clone(),
+                        tipo: archivo_info.tipo.clone(),
                         sistema_operativo: vm.sistema_operativo.clone(),
                         peso_gb: vm.peso_gb,
                         hipervisor: sanitizar_opcion(vm.hipervisor.as_deref()),
@@ -518,12 +421,121 @@ pub fn consultar_software_inventario(
         programas_disponibles: programas.into_iter().collect(),
         vms_disponibles: vms.into_iter().collect(),
         versiones_disponibles: versiones.into_iter().collect(),
-        propietarios_disponibles: propietarios.into_iter().collect(),
-        asignados_disponibles: asignados.into_iter().collect(),
-        elementos_disponibles: elementos.into_iter().collect(),
-        tipos_disponibles: tipos.into_iter().collect(),
+        responsables_disponibles: responsables.into_iter().collect(),
+        tipos_disponibles: tipos_inventario
+            .into_iter()
+            .map(|tipo| tipo.nombre)
+            .collect(),
         categorias_disponibles: categorias.into_iter().collect(),
         tags_disponibles: tags.into_iter().collect(),
         coincidencias,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn directorio_temporal(nombre: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("reloj válido")
+            .as_nanos();
+        let ruta = std::env::temp_dir().join(format!("vminventory-{nombre}-{nonce}"));
+        fs::create_dir_all(&ruta).expect("crear directorio temporal");
+        ruta
+    }
+
+    fn reporte_legacy() -> &'static str {
+        r#"{
+          "exitosa": true,
+          "nombre_vm": "vm-produccion",
+          "ruta_carpeta": "/vms/produccion",
+          "propietario": null,
+          "tipo_posesion": "Personas",
+          "elemento_asignado": null,
+          "origen_categoria": "Personas",
+          "asignado": "Operador A",
+          "elemento": null,
+          "sistema_operativo": "Windows",
+          "peso_gb": 4.0,
+          "fecha_relevamiento": "2026-01-01",
+          "programas": [{"nombre": "Editor", "version": "1.0", "editor": null, "categoria": null, "tags": [], "relevante": true}]
+        }"#
+    }
+
+    #[test]
+    fn detecta_tipos_directos_e_ignora_archivos_y_raiz() {
+        let raiz = directorio_temporal("tipos");
+        fs::create_dir_all(raiz.join("Produccion/servidor-a")).unwrap();
+        fs::create_dir_all(raiz.join("QA")).unwrap();
+        fs::write(raiz.join("archivo.json"), reporte_legacy()).unwrap();
+        fs::write(raiz.join("Produccion/reporte.json"), reporte_legacy()).unwrap();
+
+        let tipos = detectar_tipos_inventario(&raiz).unwrap();
+        assert_eq!(
+            tipos.iter().map(|tipo| &tipo.nombre).collect::<Vec<_>>(),
+            vec!["Produccion", "QA"]
+        );
+        let archivos = recolectar_archivos_json(&raiz).unwrap();
+        assert_eq!(archivos.len(), 1);
+        assert_eq!(archivos[0].tipo, "Produccion");
+        fs::remove_dir_all(raiz).unwrap();
+    }
+
+    #[test]
+    fn agrupa_y_filtra_por_tipo_dinamico_y_responsable_legacy() {
+        let raiz = directorio_temporal("consulta");
+        fs::create_dir_all(raiz.join("Produccion")).unwrap();
+        fs::create_dir_all(raiz.join("Pruebas")).unwrap();
+        fs::write(raiz.join("Produccion/operador_a.json"), reporte_legacy()).unwrap();
+        fs::write(raiz.join("Pruebas/otro_responsable.json"), reporte_legacy()).unwrap();
+
+        let resultado = consultar_software_inventario_con_limite(
+            raiz.to_str().unwrap(),
+            Some("Editor".to_string()),
+            None,
+            None,
+            Some("Produccion".to_string()),
+            Some("operador a".to_string()),
+            30,
+        )
+        .unwrap();
+
+        assert_eq!(resultado.tipos_disponibles, vec!["Produccion", "Pruebas"]);
+        assert_eq!(resultado.coincidencias.len(), 1);
+        assert_eq!(resultado.coincidencias[0].tipo, "Produccion");
+        assert_eq!(
+            resultado.coincidencias[0].responsable.as_deref(),
+            Some("operador a")
+        );
+        assert_eq!(
+            responsable_desde_archivo(Path::new("juan_perez.json")),
+            Some("juan perez".to_string())
+        );
+        assert_eq!(
+            responsable_desde_archivo(Path::new("sin_guiones_bajos.json")),
+            Some("sin guiones bajos".to_string())
+        );
+        assert_eq!(
+            responsable_desde_archivo(Path::new("reporte.JSON")),
+            Some("reporte".to_string())
+        );
+        fs::remove_dir_all(raiz).unwrap();
+    }
+
+    #[test]
+    fn rechaza_una_carpeta_de_inventario_inexistente_o_no_legible() {
+        let raiz = directorio_temporal("inaccesible");
+        let archivo = raiz.join("no-es-carpeta");
+        fs::write(&archivo, "contenido").unwrap();
+
+        let error =
+            consultar_software_inventario(archivo.to_str().unwrap(), None, None, None, None, None)
+                .expect_err("un archivo no puede leerse como carpeta de inventario");
+        assert!(error.contains("no existe"));
+        fs::remove_dir_all(raiz).unwrap();
+    }
 }

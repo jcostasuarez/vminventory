@@ -9,9 +9,9 @@ pub mod relevamiento;
 mod vmspect_backend;
 
 use commands::{
-    abrir_carpeta, consultar_software_en_jsons, detener_inspeccion, exportar_informe_individual,
-    inspeccionar_disco_vm, obtener_diagnostico, obtener_informacion_reglas, obtener_version_app,
-    probar_clasificacion_software, procesar_relevamiento, ventana_cerrar,
+    consultar_software_en_jsons, detener_inspeccion, exportar_informe_individual,
+    inspeccionar_disco_vm, inspection_progress, obtener_diagnostico, obtener_informacion_reglas,
+    obtener_version_app, probar_clasificacion_software, procesar_relevamiento, ventana_cerrar,
     ventana_maximizar_restaurar, ventana_minimizar,
 };
 use models::AppState;
@@ -30,6 +30,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Relevamiento masivo y cancelación
             procesar_relevamiento,
+            inspection_progress,
             detener_inspeccion,
             // Inspección directa de discos
             inspeccionar_disco_vm,
@@ -42,8 +43,6 @@ pub fn run() {
             // Reglas de clasificación
             obtener_informacion_reglas,
             probar_clasificacion_software,
-            // Utilidades del sistema
-            abrir_carpeta,
             // Controles de ventana sin marco
             ventana_minimizar,
             ventana_maximizar_restaurar,

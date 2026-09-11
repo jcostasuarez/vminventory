@@ -1,5 +1,5 @@
 import { invoke as tauriInvoke } from '@tauri-apps/api/core';
-import { listen as tauriListen } from '@tauri-apps/api/event';
+
 import { open as tauriOpen } from '@tauri-apps/plugin-dialog';
 import { UIManager } from './ui';
 import type {
@@ -14,11 +14,12 @@ import type {
   DocumentLike,
   EstadoSupervision,
   InformeDirecto,
+  InspectionProgress,
   InvokeFunction,
   OpenFolder,
   OpenFolderOptions,
   OperationRecord,
-  ProgresoInspeccion,
+
   RelevamientoPayload,
   ResumenRelevamiento,
   ResultadoConsultaSoftware,
@@ -35,11 +36,12 @@ export const APP_VERSION_FALLBACK =
 
 export const CONFIG_DEFAULT: Readonly<AppConfig> = Object.freeze({
   tema: 'light',
-  ruta_bd_json: ''
+  ruta_bd_json: '',
+  limite_coincidencias: 30
 });
 
 export const ANALYZER_CONFIG_DEFAULT: Readonly<AnalyzerConfig> = Object.freeze({
-  max_hilos: 4,
+  max_hilos: 2,
   modo_dump: false,
   incluir_system: false,
   forzar_qemu: false,
@@ -147,7 +149,8 @@ export class AppState {
         this.config = {
           ...CONFIG_DEFAULT,
           tema: saved.tema === 'dark' ? 'dark' : 'light',
-          ruta_bd_json: typeof saved.ruta_bd_json === 'string' ? saved.ruta_bd_json : ''
+          ruta_bd_json: typeof saved.ruta_bd_json === 'string' ? saved.ruta_bd_json : '',
+          limite_coincidencias: Math.min(100, Math.max(10, Math.round(Number(saved.limite_coincidencias) || 30)))
         };
       }
 
@@ -170,6 +173,9 @@ export class AppState {
       ...(values.tema !== undefined ? { tema: values.tema === 'dark' ? 'dark' : 'light' } : {}),
       ...(values.ruta_bd_json !== undefined
         ? { ruta_bd_json: String(values.ruta_bd_json || '').trim() }
+        : {}),
+      ...(values.limite_coincidencias !== undefined
+        ? { limite_coincidencias: Math.min(100, Math.max(10, Math.round(Number(values.limite_coincidencias) || 30))) }
         : {})
     };
 
@@ -236,6 +242,7 @@ export function crearApi(invoke: InvokeFunction = tauriInvoke as InvokeFunction)
       'procesar_relevamiento',
       payload
     ),
+    inspectionProgress: () => invoke<InspectionProgress>('inspection_progress'),
     detenerInspeccion: () => invoke<void>('detener_inspeccion'),
     inspeccionarDisco: (rutaDisco: string, configuracion: AnalyzerConfigPayload) =>
       invoke<InformeDirecto>('inspeccionar_disco_vm', {
@@ -249,7 +256,6 @@ export function crearApi(invoke: InvokeFunction = tauriInvoke as InvokeFunction)
       'consultar_software_en_jsons',
       payload
     ),
-    abrirCarpeta: (ruta: string) => invoke<void>('abrir_carpeta', { ruta }),
     ventana: Object.freeze({
       minimizar: () => invoke<void>('ventana_minimizar'),
       maximizar: () => invoke<void>('ventana_maximizar_restaurar'),
@@ -259,6 +265,35 @@ export function crearApi(invoke: InvokeFunction = tauriInvoke as InvokeFunction)
 }
 
 export const api = crearApi();
+
+/**
+ * Normaliza el snapshot IPC antes de usarlo en cálculos o en la UI. Aunque
+ * Rust serializa números, esta frontera también tolera respuestas antiguas o
+ * adaptadores que entreguen valores numéricos como texto.
+ */
+export function normalizarInspectionProgress(value: unknown): InspectionProgress {
+  const source = value && typeof value === 'object'
+    ? value as Record<string, unknown>
+    : {};
+  const nonNegativeInteger = (candidate: unknown): number => {
+    const parsed = Number(candidate);
+    return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : 0;
+  };
+  const clampPercentage = (candidate: unknown): number => {
+    const parsed = Number(candidate);
+    return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 0;
+  };
+
+  return {
+    completed_tasks: nonNegativeInteger(source.completed_tasks),
+    total_tasks: nonNegativeInteger(source.total_tasks),
+    percentage: clampPercentage(source.percentage),
+    stage_id: nonNegativeInteger(source.stage_id),
+    bytes_processed: nonNegativeInteger(source.bytes_processed),
+    total_bytes: nonNegativeInteger(source.total_bytes),
+    cancelled: source.cancelled === true || String(source.cancelled).toLowerCase() === 'true'
+  };
+}
 
 export async function seleccionarCarpeta(
   open: OpenFolder = tauriOpen as unknown as OpenFolder,
@@ -294,10 +329,10 @@ const CAMPOS_BUSQUEDA = [
   'inputBuscarPrograma',
   'inputBuscarVm',
   'inputBuscarVersion',
-  'inputBuscarPropietario'
+  'inputBuscarResponsable'
 ] as const;
 type CampoBusqueda = typeof CAMPOS_BUSQUEDA[number];
-type CampoLimpieza = 'btnLimpiarPrograma' | 'btnLimpiarVm';
+type CampoLimpieza = 'btnLimpiarPrograma' | 'btnLimpiarVm' | 'btnLimpiarVersion' | 'btnLimpiarResponsable';
 
 interface ConsultorFlowOptions {
   ui: ConsultorFlowUi;
@@ -353,6 +388,12 @@ export class ConsultorFlow {
     this.ui.btnLimpiarVm?.addEventListener('click', () => {
       this.limpiarCampo('inputBuscarVm', 'btnLimpiarVm');
     });
+    this.ui.btnLimpiarVersion?.addEventListener('click', () => {
+      this.limpiarCampo('inputBuscarVersion', 'btnLimpiarVersion');
+    });
+    this.ui.btnLimpiarResponsable?.addEventListener('click', () => {
+      this.limpiarCampo('inputBuscarResponsable', 'btnLimpiarResponsable');
+    });
 
     CAMPOS_BUSQUEDA.forEach((fieldName: CampoBusqueda) => {
       const input = this.ui[fieldName];
@@ -377,6 +418,27 @@ export class ConsultorFlow {
     this.ui.selectBuscarTipo?.addEventListener('change', () => {
       void this.buscar();
     });
+
+    this.ui.consultorActiveFilters?.addEventListener('click', (event) => {
+      const chip = event.target?.closest?.('[data-filter-clear]');
+      const field = chip?.getAttribute('data-filter-clear');
+      if (field) this.limpiarFiltroIndividual(field);
+    });
+  }
+
+  private limpiarFiltroIndividual(field: string): void {
+    if (field === 'programa' && this.ui.inputBuscarPrograma) {
+      this.ui.inputBuscarPrograma.value = '';
+    } else if (field === 'vm' && this.ui.inputBuscarVm) {
+      this.ui.inputBuscarVm.value = '';
+    } else if (field === 'tipo') {
+      if (this.ui.selectBuscarTipo) this.ui.selectBuscarTipo.value = 'todos';
+    } else if (field === 'version' && this.ui.inputBuscarVersion) {
+      this.ui.inputBuscarVersion.value = '';
+    } else if (field === 'responsable' && this.ui.inputBuscarResponsable) {
+      this.ui.inputBuscarResponsable.value = '';
+    }
+    void this.buscar();
   }
 
   private cancelarDebounce(): void {
@@ -413,7 +475,8 @@ export class ConsultorFlow {
         filtroVm: filtros.vm || null,
         filtroVersion: filtros.version || null,
         filtroTipo: filtros.tipo !== 'todos' ? filtros.tipo : null,
-        filtroPropietario: filtros.propietario || null
+        filtroResponsable: filtros.responsable || null,
+        limiteCoincidencias: this.state.config.limite_coincidencias
       });
 
       if (requestId !== this.requestId || !resultado) return resultado;
@@ -421,11 +484,13 @@ export class ConsultorFlow {
         resultado.programas_disponibles ?? [],
         resultado.vms_disponibles ?? [],
         resultado.versiones_disponibles ?? [],
-        resultado.propietarios_disponibles ?? [],
-        resultado.asignados_disponibles ?? [],
-        resultado.elementos_disponibles ?? []
+        resultado.responsables_disponibles ?? []
       );
-      this.ui.renderResultadosSoftware?.(resultado, filtros, (path) => this.abrirCarpeta(path));
+      this.ui.poblarTipos?.(resultado.tipos_disponibles ?? []);
+      // Si una carpeta se eliminó o renombró, el selector descarta el tipo
+      // obsoleto y se repite la consulta sin ese filtro.
+      if (this.leerFiltros().tipo !== filtros.tipo) return this.buscar();
+      this.ui.renderResultadosSoftware?.(resultado, filtros);
       return resultado;
     } catch (error) {
       if (requestId === this.requestId) {
@@ -444,18 +509,8 @@ export class ConsultorFlow {
       vm: this.ui.inputBuscarVm?.value.trim() || '',
       version: this.ui.inputBuscarVersion?.value.trim() || '',
       tipo: this.ui.selectBuscarTipo?.value || 'todos',
-      propietario: this.ui.inputBuscarPropietario?.value.trim() || ''
+      responsable: this.ui.inputBuscarResponsable?.value.trim() || ''
     };
-  }
-
-  async abrirCarpeta(path: string): Promise<unknown | null> {
-    try {
-      return await this.api.abrirCarpeta(path);
-    } catch (error) {
-      console.error('No se pudo abrir la carpeta de la VM:', error);
-      if (typeof alert === 'function') alert(`No se pudo abrir la carpeta de la VM: ${error}`);
-      return null;
-    }
   }
 }
 
@@ -475,6 +530,11 @@ export class AnalizadorFlow {
   private readonly open: OpenFolder;
   private rutaOrigen = '';
   private rutaDestino = '';
+  private pollingTimer: ReturnType<typeof setInterval> | null = null;
+  private progressRequestPending = false;
+  private startedAt = 0;
+  private lastProgressKey: string | null = null;
+  private lastSnapshot: InspectionProgress | null = null;
 
   constructor({ ui, state, apiClient, operation, open }: AnalizadorFlowOptions) {
     this.ui = ui;
@@ -542,6 +602,129 @@ export class AnalizadorFlow {
     }
   }
 
+  /** Libera el polling si la vista se desmonta antes de acabar la operación. */
+  dispose(): void {
+    this.detenerPolling();
+  }
+
+  private iniciarPolling(): void {
+    this.detenerPolling();
+    this.startedAt = performance.now();
+    this.lastProgressKey = null;
+    this.pollingTimer = setInterval(() => void this.consultarProgreso(), 400);
+    void this.consultarProgreso();
+  }
+
+  private detenerPolling(): void {
+    if (this.pollingTimer !== null) clearInterval(this.pollingTimer);
+    this.pollingTimer = null;
+    this.progressRequestPending = false;
+  }
+
+  private async consultarProgreso(): Promise<void> {
+    if (this.progressRequestPending || this.pollingTimer === null) return;
+    this.progressRequestPending = true;
+    try {
+      const snapshot = normalizarInspectionProgress(await this.api.inspectionProgress());
+      const key = [
+        snapshot.completed_tasks,
+        snapshot.total_tasks,
+        snapshot.percentage,
+        snapshot.stage_id,
+        snapshot.bytes_processed,
+        snapshot.total_bytes,
+        snapshot.cancelled
+      ].join(':');
+      if (key !== this.lastProgressKey) {
+        this.lastProgressKey = key;
+        this.lastSnapshot = snapshot;
+        this.ui.actualizarTelemetria(this.adaptarProgreso(snapshot));
+      }
+      if (snapshot.total_tasks > 0 && snapshot.completed_tasks >= snapshot.total_tasks) {
+        this.detenerPolling();
+      }
+    } catch (error) {
+      // Un fallo transitorio de IPC no invalida el resultado final del lote.
+      console.warn('No se pudo consultar el progreso del relevamiento:', error);
+    } finally {
+      this.progressRequestPending = false;
+    }
+  }
+
+  private adaptarProgreso(snapshot: InspectionProgress): EstadoSupervision {
+    const elapsedSeconds = Math.max(0, (performance.now() - this.startedAt) / 1000);
+    const completed = snapshot.completed_tasks;
+    const total = snapshot.total_tasks;
+    const speed = elapsedSeconds > 0 ? completed / elapsedSeconds * 60 : 0;
+    const eta = speed > 0 && total > completed
+      ? `${Math.ceil((total - completed) / speed * 60)}s`
+      : null;
+    const etapa = snapshot.cancelled ? 'Cancelación solicitada' : `Etapa vmspect ${snapshot.stage_id}`;
+
+    return {
+      fase: snapshot.cancelled ? 'cancelado' : 'analizando_v_ms',
+      progreso_global: snapshot.percentage,
+      mensaje_estado: total > 0
+        ? `Imágenes completadas: ${completed} / ${total}.`
+        : 'Preparando relevamiento...',
+      vms_procesadas: completed,
+      total_vms: total,
+      // El snapshot de vmspect no separa éxitos y errores durante el lote.
+      vms_exitosas: 0,
+      vms_con_observaciones: 0,
+      vms_discrepantes: 0,
+      vms_fallidas: 0,
+      tiempo_transcurrido_formateado: `${Math.floor(elapsedSeconds)}s`,
+      tiempo_restante_formateado: eta,
+      velocidad_vms_minuto: speed,
+      vm_actual_indice: 0,
+      vm_actual_nombre: null,
+      progreso_vm_actual: snapshot.percentage,
+      etapa_vm_actual: etapa,
+      detalle_vm_actual: null,
+      vms_activas: [],
+      logs_recientes: [],
+      peso_total_procesado_gb: snapshot.bytes_processed / (1024 ** 3)
+    };
+  }
+
+  private actualizarTelemetriaFinal(resumen: ResumenRelevamiento): void {
+    const procesadas = resumen.vms_exitosas + resumen.vms_con_observaciones + resumen.vms_fallidas;
+    const snapshot = this.lastSnapshot ?? {
+      completed_tasks: procesadas,
+      total_tasks: resumen.total_vms,
+      percentage: 100,
+      stage_id: 0,
+      bytes_processed: Math.round(resumen.peso_total_gb * (1024 ** 3)),
+      total_bytes: Math.round(resumen.peso_total_gb * (1024 ** 3)),
+      cancelled: resumen.cancelado
+    };
+    const estado = this.adaptarProgreso(snapshot);
+    this.ui.actualizarTelemetria({
+      ...estado,
+      fase: resumen.fase,
+      progreso_global: 100,
+      mensaje_estado: resumen.cancelado
+        ? `Relevamiento cancelado: ${resumen.total_vms} imágenes detectadas.`
+        : `Relevamiento finalizado: ${resumen.total_vms} imágenes procesadas.`,
+      vms_procesadas: procesadas,
+      total_vms: resumen.total_vms,
+      vms_exitosas: resumen.vms_exitosas,
+      vms_con_observaciones: resumen.vms_con_observaciones,
+      vms_discrepantes: resumen.vms_discrepantes,
+      vms_fallidas: resumen.vms_fallidas,
+      tiempo_transcurrido_formateado: resumen.duracion_formateada,
+      tiempo_restante_formateado: null,
+      peso_total_procesado_gb: resumen.peso_total_gb
+    });
+    console.info('Estado final del relevamiento', {
+      cancelado: resumen.cancelado,
+      total_vms: resumen.total_vms,
+      exitosas: resumen.vms_exitosas,
+      fallidas: resumen.vms_fallidas
+    });
+  }
+
   async ejecutar(): Promise<ResumenRelevamiento | null> {
     if (this.operation.current?.kind === 'analizador') {
       this.operation.markCancelling('analizador');
@@ -563,20 +746,32 @@ export class AnalizadorFlow {
 
     const config = this.state.obtenerConfiguracionAnalizador();
     this.ui.setEstadoAnalizador(true);
+    const relevamiento = this.api.procesarRelevamiento({
+      rutaOrigen: this.rutaOrigen,
+      rutaDestino: this.rutaDestino,
+      generarDiscrepancias: config.generar_discrepancias,
+      configuracion: this.state.obtenerPayloadAnalizador()
+    });
+    this.iniciarPolling();
     try {
-      const resumen = await this.api.procesarRelevamiento({
-        rutaOrigen: this.rutaOrigen,
-        rutaDestino: this.rutaDestino,
-        generarDiscrepancias: config.generar_discrepancias,
-        configuracion: this.state.obtenerPayloadAnalizador()
-      });
+      const resumen = await relevamiento;
+      this.actualizarTelemetriaFinal(resumen);
+      const renderStarted = performance.now();
       this.ui.renderResumenRelevamiento(resumen);
+      const uiRenderMs = Math.round(performance.now() - renderStarted);
+      resumen.metricas.ui_render_ms = uiRenderMs;
+      console.info('VM scan timing', {
+        ui_render_ms: uiRenderMs,
+        total_ms: resumen.metricas.total_ms,
+        batch_ms: resumen.metricas.batch_ms
+      });
       return resumen;
     } catch (error) {
       console.error('Error durante el relevamiento:', error);
       this.ui.mostrarErrorAnalizador(error);
       return null;
     } finally {
+      this.detenerPolling();
       this.operation.finish('analizador');
       this.ui.setEstadoAnalizador(false);
       this.actualizarPasos();
@@ -597,6 +792,23 @@ interface ReporteFlowOptions {
   open: OpenFolder;
 }
 
+const REPORTE_POLLING_MS = 250;
+const MAX_REPORTE_PROGRESS_ERRORS = 3;
+
+function etapaReporte(stageId: number): string {
+  return {
+    0: 'Preparando inspección',
+    1: 'Detectando imagen de disco',
+    2: 'Leyendo particiones',
+    3: 'Analizando sistema operativo y software',
+    4: 'Finalizando reporte'
+  }[stageId] || `Etapa vmspect ${stageId}`;
+}
+
+function esSnapshotDeProgreso(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && 'percentage' in value);
+}
+
 export class ReporteFlow {
   private readonly ui: UIManager;
   private readonly state: AppState;
@@ -605,6 +817,11 @@ export class ReporteFlow {
   private readonly open: OpenFolder;
   private rutaDisco = '';
   private informe: InformeDirecto | null = null;
+  private pollingTimer: ReturnType<typeof setInterval> | null = null;
+  private progressRequestPending = false;
+  private progressErrors = 0;
+  private lastPercentage = 0;
+  private disposed = false;
 
   constructor({ ui, state, apiClient, operation, open }: ReporteFlowOptions) {
     this.ui = ui;
@@ -620,13 +837,18 @@ export class ReporteFlow {
       if (event.target?.closest?.('#btnSeleccionarDiscoReporte')) return;
       void this.seleccionarDisco();
     });
+    this.ui.cardStepDiscoReporte?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault?.();
+      void this.seleccionarDisco();
+    });
     this.ui.btnSeleccionarDiscoReporte?.addEventListener('click', () => void this.seleccionarDisco());
     this.ui.btnIniciarReporte?.addEventListener('click', () => void this.ejecutar());
     this.ui.btnExportarReporte?.addEventListener('click', () => void this.exportar());
   }
 
   private async seleccionarDisco(): Promise<void> {
-    if (this.operation.busy) return;
+    if (this.disposed || this.operation.busy) return;
     try {
       const ruta = await seleccionarArchivo(
         this.open,
@@ -636,9 +858,11 @@ export class ReporteFlow {
           extensions: ['vmdk', 'vdi', 'vhd', 'vhdx', 'qcow2', 'qcow', 'raw', 'img', 'json']
         }]
       );
-      if (ruta) {
+      if (ruta && !this.disposed) {
         this.rutaDisco = ruta;
         this.informe = null;
+        this.detenerPolling();
+        this.ui.setEstadoReporte(false);
         this.ui.btnExportarReporte && (this.ui.btnExportarReporte.disabled = true);
         this.ui.setDiscoReporte(ruta);
       }
@@ -647,31 +871,119 @@ export class ReporteFlow {
     }
   }
 
+  /** Detiene el polling cuando la vista deja de existir. */
+  dispose(): void {
+    this.disposed = true;
+    this.detenerPolling();
+  }
+
+  private iniciarPolling(): void {
+    this.detenerPolling();
+    this.progressErrors = 0;
+    this.lastPercentage = 0;
+    this.pollingTimer = setInterval(() => void this.consultarProgreso(), REPORTE_POLLING_MS);
+    void this.consultarProgreso();
+  }
+
+  private detenerPolling(): void {
+    if (this.pollingTimer !== null) clearInterval(this.pollingTimer);
+    this.pollingTimer = null;
+    this.progressRequestPending = false;
+  }
+
+  private async consultarProgreso(): Promise<void> {
+    if (this.disposed || this.progressRequestPending || this.pollingTimer === null) return;
+    this.progressRequestPending = true;
+    try {
+      const raw = await this.api.inspectionProgress();
+      if (this.disposed || this.pollingTimer === null) return;
+      if (!esSnapshotDeProgreso(raw)) {
+        this.progressErrors += 1;
+        this.ui.actualizarProgresoReporte({
+          porcentaje: this.lastPercentage,
+          etapa: 'Progreso no disponible',
+          detalle: 'La API no devolvió un porcentaje para esta inspección.'
+        });
+        if (this.progressErrors >= MAX_REPORTE_PROGRESS_ERRORS) this.detenerPolling();
+        return;
+      }
+
+      const snapshot = normalizarInspectionProgress(raw);
+      this.progressErrors = 0;
+      this.lastPercentage = snapshot.percentage;
+      this.ui.actualizarProgresoReporte({
+        porcentaje: snapshot.percentage,
+        etapa: snapshot.cancelled ? 'Inspección cancelada' : etapaReporte(snapshot.stage_id),
+        detalle: snapshot.total_tasks > 0
+          ? `Tareas completadas: ${snapshot.completed_tasks} / ${snapshot.total_tasks}`
+          : snapshot.total_bytes > 0
+            ? `Procesado: ${snapshot.bytes_processed} / ${snapshot.total_bytes} bytes`
+            : null
+      });
+
+      if (snapshot.cancelled || snapshot.percentage >= 100) this.detenerPolling();
+    } catch (error) {
+      if (!this.disposed) {
+        this.progressErrors += 1;
+        console.warn('No se pudo consultar el progreso del Reporte:', error);
+        this.ui.actualizarProgresoReporte({
+          porcentaje: this.lastPercentage,
+          etapa: 'Progreso no disponible',
+          detalle: 'La inspección continúa, pero la API no está entregando avances.'
+        });
+        if (this.progressErrors >= MAX_REPORTE_PROGRESS_ERRORS) this.detenerPolling();
+      }
+    } finally {
+      this.progressRequestPending = false;
+    }
+  }
+
   async ejecutar(): Promise<InformeDirecto | null> {
-    if (this.operation.busy || !this.rutaDisco) return null;
+    if (this.disposed || this.operation.busy || !this.rutaDisco) return null;
     if (!this.operation.start('reporte')) return null;
     this.ui.setEstadoReporte(true);
     this.ui.actualizarProgresoReporte({
-      porcentaje: 5,
-      etapa: 'Iniciando inspección estática',
+      porcentaje: 0,
+      etapa: 'Pendiente',
       detalle: this.rutaDisco
     });
+
+    const inspeccion = this.api.inspeccionarDisco(
+      this.rutaDisco,
+      this.state.obtenerPayloadAnalizador()
+    );
+    this.iniciarPolling();
+
+    let completado = false;
     try {
-      const informe = await this.api.inspeccionarDisco(
-        this.rutaDisco,
-        this.state.obtenerPayloadAnalizador()
-      );
+      const informe = await inspeccion;
+      if (this.disposed) return null;
       this.informe = informe;
+      this.detenerPolling();
+      this.ui.actualizarProgresoReporte({
+        porcentaje: 100,
+        etapa: 'Reporte completado',
+        detalle: 'La inspección finalizó correctamente.'
+      });
       this.ui.renderInformeDirecto(informe);
       if (this.ui.btnExportarReporte) this.ui.btnExportarReporte.disabled = false;
+      completado = true;
       return informe;
     } catch (error) {
       console.error('Error durante la inspección individual:', error);
-      this.ui.mostrarErrorReporte(error);
+      if (!this.disposed) {
+        this.ui.actualizarProgresoReporte({
+          porcentaje: this.lastPercentage,
+          etapa: 'Error en la inspección',
+          detalle: String(error)
+        });
+        this.ui.mostrarErrorReporte(error);
+      }
       return null;
     } finally {
+      this.detenerPolling();
       this.operation.finish('reporte');
-      this.ui.setEstadoReporte(false);
+      if (!this.disposed) this.ui.setEstadoReporte(false, completado);
     }
   }
 
@@ -717,9 +1029,10 @@ function bindShell(
   });
 
   ui.btnOpenAjustes?.addEventListener('click', () => {
-    ui.abrirModal(ui.herramientaActiva === 'consultor'
-      ? ui.modalConfigConsultor
-      : ui.modalConfigAnalizador);
+    ui.abrirModal(
+      ui.herramientaActiva === 'consultor' ? ui.modalConfigConsultor : ui.modalConfigAnalizador,
+      ui.btnOpenAjustes
+    );
   });
   ui.btnCloseConfigConsultor?.addEventListener('click', () => ui.cerrarModal(ui.modalConfigConsultor));
   ui.btnCancelarConfigConsultor?.addEventListener('click', () => ui.cerrarModal(ui.modalConfigConsultor));
@@ -769,6 +1082,10 @@ function bindShell(
     ui.sincronizarConfiguracionAnalizador(config);
     ui.cerrarModal(ui.modalConfigAnalizador);
   });
+
+  ui.btnRestablecerConfigAnalizador?.addEventListener('click', () => {
+    ui.restablecerFormularioConfigAnalizador(ANALYZER_CONFIG_DEFAULT);
+  });
 }
 
 export interface BootstrapResult {
@@ -800,8 +1117,7 @@ export function bootstrap({
 
   const state = new AppState(storage);
   const apiClient = crearApi(invoke);
-  const abrirCarpeta = (path: string) => apiClient.abrirCarpeta(path);
-  const ui = new UIManager({ documentRef, onAbrirCarpeta: abrirCarpeta });
+  const ui = new UIManager({ documentRef });
   const operation = new OperationState();
   const flow = new ConsultorFlow({ ui, state, apiClient });
   const analyzer = new AnalizadorFlow({ ui, state, apiClient, operation, open });
@@ -820,12 +1136,7 @@ export function bootstrap({
   void apiClient.obtenerDiagnostico()
     .then((diagnostico) => ui.actualizarDiagnostico(diagnostico))
     .catch((error) => console.warn('Diagnóstico no disponible:', error));
-  void tauriListen<EstadoSupervision>('progreso_supervision', (event) => {
-    ui.actualizarTelemetria(event.payload);
-  }).catch((error) => console.warn('Telemetría no disponible:', error));
-  void tauriListen<ProgresoInspeccion>('progreso_inspeccion_directa', (event) => {
-    ui.actualizarProgresoReporte(event.payload);
-  }).catch((error) => console.warn('Progreso de Reporte no disponible:', error));
+
 
   if (state.config.ruta_bd_json) void flow.buscar();
 

@@ -2,11 +2,11 @@
 
 > **Auditoría, relevamiento masivo e inspección estática forense de máquinas virtuales.**
 
-[![Release](https://img.shields.io/badge/Release-v3.1.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v3.1.0)
+[![Release](https://img.shields.io/badge/Release-v3.2.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v3.2.0)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.77+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0+-646CFF.svg?logo=vite)](https://vitejs.dev/)
-[![Engine](https://img.shields.io/badge/Engine-vmspect_v0.5.0-emerald.svg)](https://crates.io/crates/vmspect)
+[![Engine](https://img.shields.io/badge/Engine-vmspect_v0.8.0-emerald.svg)](https://crates.io/crates/vmspect)
 [![Backend](https://img.shields.io/badge/NBD-qemu--nbd-purple.svg)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#)
 
@@ -18,15 +18,15 @@
 
 ### 1. 📂 Relevador Masivo de VMs
 - **Inspección sin encendido**: Analiza discos virtuales estáticamente utilizando el motor `vmspect` con soporte nativo y backend `qemu-nbd`.
-- **Procesamiento paralelo multihilo**: Configura el número de hilos de trabajo según la CPU para acelerar escaneos en lotes de gran volumen.
+- **Procesamiento paralelo acotado**: Inicia los lotes con dos workers y solo aumenta la concurrencia mediante una selección explícita.
 - **Tolerancia a fallos**: `vmspect` informa advertencias y conserva resultados parciales sin abortar todo el relevamiento.
-- **Telemetría y supervisión en tiempo real**:
-  - Cronómetro autónomo de 1 segundo desacoplado de eventos del backend.
+- **Telemetría y supervisión por snapshots**:
+  - El frontend consulta `inspection_progress` cada 400 ms, sin callbacks ni eventos Tauri desde los workers.
   - Barra de progreso continuo con interpolación y transiciones suaves (`transition: width 0.5s ease-in-out`).
-  - Velocidad de procesamiento (VMs/min) y volumen procesado (GB).
-  - Panel en vivo con estado de cada worker y flujo continuo de bitácora (*live logs*).
+  - Velocidad estimada (VMs/min) y volumen procesado derivados de las tareas y bytes publicados por el motor.
+  - `vmspect 0.8.0` publica snapshots atómicos de progreso agregado; no expone el detalle por worker ni una bitácora incremental.
 - **Reportes consolidados**: Genera bases de datos estructuradas en formato JSON y reportes automáticos de discrepancias.
-- **Cancelación segura**: La misma bandera atómica se entrega a `vmspect` y permite detener la operación preservando lo ya procesado.
+- **Cancelación segura**: Un token compartido permite detener la operación preservando los resultados ya procesados y sin iniciar nuevas imágenes pendientes.
 
 ### 2. 🔎 Consultor y Analizador de Software
 - **Búsqueda multicriterio instantánea**: Filtra por nombre de programa, máquina virtual, versión, propietario, sistema operativo, tipo de posesión y categoría.
@@ -34,13 +34,13 @@
   - **Tabla / Lista**: Visualización tabular detallada con ordenamiento y paginación.
   - **Tarjetas (*Cards View*)**: Vista modular interactiva con detalles expandibles.
   - **Gráficos e Indicadores (*Graph View*)**: Métricas visuales de distribución por SO, categorías más frecuentes y densidad de software.
-- **Integración con el explorador**: Acceso directo con un clic a la carpeta física de la VM (`abrir_carpeta`).
+
 - **Historial de auditorías**: Registro de relevamientos previos con recarga rápida de índices.
 
 ### 3. 🔬 Inspector Directo de Discos Virtuales
 - **Análisis forense individual**: Inspecciona archivos de disco específicos (`.vmdk`, `.vdi`, `.vhdx`, `.qcow2`, `.raw`, `.img`).
 - **Detección de particiones y sistemas de archivos**: MBR/GPT, particiones NTFS/FAT/EXT4, etiquetas de volumen, inicio y tamaño.
-- **Extracción de metadatos del huésped**: Nombre de SO, edición, build, service pack, hostname, arquitectura y versión de herramientas de virtualización (*VM Tools*).
+- **Extracción de metadatos del huésped**: Nombre de SO, edición, build, service pack y versión de herramientas de virtualización (*VM Tools*).
 - **Exportación individual**: Exportación directa del informe de inspección a JSON.
 - **Métricas de rendimiento**: Modo de acceso (nativo vs. NBD `qemu-nbd`), bytes leídos y duración en milisegundos.
 
@@ -59,8 +59,10 @@
 La interfaz expone nuevamente las tres herramientas principales:
 
 - **Analizador:** recibe un directorio de origen, busca recursivamente imágenes de máquinas virtuales con `vmspect` y genera la base de datos JSON en el destino indicado. Incluye progreso, workers, cancelación y configuración del motor.
-- **Consultor:** consulta los reportes JSON generados y permite filtrar por programa, versión, máquina virtual, tipo de posesión y asignado/elemento.
+- **Consultor:** consulta los reportes JSON generados y permite filtrar por programa, versión, máquina virtual, tipo y responsable.
 - **Reporte:** inspecciona una única imagen de disco o reporte JSON y muestra metadatos de imagen, sistema operativo, particiones y software detectado; también permite exportar el informe.
+
+En el Consultor, los tipos no se configuran manualmente: cada subcarpeta directa y legible de la carpeta de inventario se convierte en un tipo, incluso si está vacía. Los archivos y los JSON en la raíz se omiten; las carpetas inaccesibles también se omiten, y los nombres duplicados que solo difieren en mayúsculas/minúsculas se consolidan. Al recargar, el tipo se vuelve a calcular desde la ubicación actual del reporte, por lo que un reporte cuya carpeta fue eliminada deja de aparecer sin modificar su JSON.
 
 La versión se muestra en la barra de estado. El frontend la obtiene desde `CARGO_PKG_VERSION` (la versión de `src-tauri/Cargo.toml`) tanto en el comando Tauri como en el fallback de Vite, por lo que no es necesario mantener otro número de versión en la interfaz.
 
@@ -80,6 +82,34 @@ flowchart TD
     Commands --> Backend[Motor vmspect + reglas]
     Backend --> Output[Reportes JSON]
 ```
+
+---
+
+## 🔧 Progreso de relevamientos para desarrolladores
+
+El relevamiento masivo no utiliza la API antigua de callbacks para telemetría.
+Al iniciar `procesar_relevamiento`, `AppState` crea y conserva un `Arc` del
+`InspectionEngine` configurado para ese lote. El trabajo bloqueante llama a
+`inspect_batch` sobre esa misma instancia y el comando `inspection_progress`
+consulta `engine.progress().snapshot()`.
+
+El DTO IPC contiene exactamente los campos disponibles en `vmspect 0.8.0`:
+`completed_tasks`, `total_tasks`, `percentage`, `stage_id`, `bytes_processed`,
+`total_bytes` y `cancelled`. Esta versión identifica la etapa con `stage_id`,
+no con texto ni detalle por VM; la interfaz adapta esos campos y usa valores
+neutros cuando el motor no publica datos equivalentes.
+
+La inspección individual de la pantalla Reporte publica su propio
+`InspectionEngine` antes de iniciar el trabajo bloqueante y reutiliza el mismo
+comando `inspection_progress`. El frontend consulta el snapshot cada 250 ms,
+normaliza porcentajes numéricos o textuales y detiene el polling al llegar a
+`100`, ante cancelación, error definitivo o desmontaje de la vista.
+
+La cancelación se solicita con `detener_inspeccion`, que marca el token
+compartido y llama a `InspectionEngine::cancel()` para reflejarla también en el
+snapshot. El polling se limpia al terminar el comando, mientras que
+`BatchResult` y su resumen derivado son siempre la fuente de verdad final para
+reportes, errores por imagen y resultados parciales.
 
 ---
 
@@ -282,6 +312,15 @@ Gracias a la integración con el motor `vmspect` y `qemu-nbd`:
 ---
 
 ## 📝 Changelog
+
+### [v3.2.0] - 2026-09-11 (Progreso por snapshots y Consultor dinámico)
+- **Motor actualizado:** VM Inventory utiliza `vmspect v0.8.0`, con snapshots atómicos de progreso para relevamientos e inspecciones individuales.
+- **Progreso y cancelación:** el Analizador y el Reporte consultan el progreso publicado por el motor, limpian el polling al finalizar y conservan resultados parciales al cancelar.
+- **Clasificación eficiente:** los patrones se compilan una sola vez, con diagnósticos para expresiones inválidas y coincidencia de respaldo.
+- **Consultor dinámico:** los tipos se derivan de subcarpetas legibles del inventario, con filtros por versión, tipo y responsable, sugerencias y agrupación de resultados.
+- **Configuración avanzada:** se incorporan reglas, modo dump, colmena SYSTEM, discrepancias, workers, backend de disco y opciones de seguimiento en un único panel.
+- **Accesibilidad y UX:** se añaden roles ARIA, navegación por teclado, estados vivos, filtros activos y una presentación revisada para Analizador, Consultor y Reporte.
+- **Verificación:** typecheck, contratos frontend/backend, formato Rust y build Vite verificados antes del empaquetado.
 
 ### [v3.1.0] - 2026-09-08 (Rediseño del Analizador y actualización de vmspect)
 - **Motor actualizado:** VM Inventory utiliza `vmspect v0.5.0`, con diagnóstico diferenciado para `qemu-nbd` ausente y componentes VMDK faltantes.

@@ -6,15 +6,15 @@
 use crate::clasificacion::ReglasClasificacion;
 use crate::models::{
     AppState, BdRelevamiento, ConfiguracionApp, DiagnosticoSistema, InformeDirecto,
-    ProgresoInspeccion, RegistroVM, ResultadoClasificacion, ResultadoConsultaSoftware,
+    InspectionProgressDto, RegistroVM, ResultadoClasificacion, ResultadoConsultaSoftware,
     ResumenEstadisticas, ResumenImagen, ResumenParticion, ResumenRelevamiento, ResumenVmInfo,
 };
 use crate::relevamiento::{clasificar_programas, ejecutar_relevamiento};
-use crate::vmspect_backend::{construir_opciones, inspeccionar};
+use crate::vmspect_backend::{construir_opciones, construir_opciones_resumen, inspeccionar};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, State};
+use tauri::State;
 
 // ============================================================================
 // RELEVAMIENTO MASIVO
@@ -22,27 +22,31 @@ use tauri::{AppHandle, Emitter, State};
 
 /// Escanea el directorio origen en busca de imágenes de disco de VMs
 /// (`.qcow2`, `.raw`, `.vmdk`, `.vdi`, `.vhdx`, ...), las inspecciona con
-/// `vmspect` en paralelo, emite telemetría `progreso_supervision` en tiempo
-/// real y guarda la base de datos indexada en JSON en el directorio destino.
+/// `vmspect` en paralelo y guarda la base de datos indexada en JSON en el
+/// directorio destino. El progreso se consulta por `inspection_progress`.
 #[tauri::command]
 pub async fn procesar_relevamiento(
-    app: AppHandle,
     state: State<'_, AppState>,
     ruta_origen: String,
     ruta_destino: String,
     generar_discrepancias: Option<bool>,
     configuracion: Option<ConfiguracionApp>,
 ) -> Result<ResumenRelevamiento, String> {
-    state.preparar_tarea();
-    let cancelacion = state.cancel_requested.clone();
     let mut config = configuracion.unwrap_or_default();
     config.generar_discrepancias = generar_discrepancias.unwrap_or(config.generar_discrepancias);
+    let mut opciones = construir_opciones_resumen(&config, &state.cancel_requested);
+    // El relevamiento consolida los programas; el modo resumido solo conserva
+    // los parámetros de backend seguros para los lotes.
+    opciones.no_apps = false;
+    let (operacion, engine) = state.iniciar_relevamiento(opciones)?;
+    let cancelacion = state.cancel_requested.clone();
     let origen = ruta_origen.clone();
     let destino = ruta_destino.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
+        let _operacion = operacion;
         ejecutar_relevamiento(
-            &app,
+            engine,
             cancelacion,
             &origen,
             &destino,
@@ -52,6 +56,15 @@ pub async fn procesar_relevamiento(
     })
     .await
     .map_err(|e| format!("Error interno del runtime de tareas: {e}"))?
+}
+
+/// Devuelve el snapshot del mismo motor que está ejecutando el relevamiento.
+#[tauri::command]
+pub fn inspection_progress(state: State<AppState>) -> InspectionProgressDto {
+    state
+        .engine()
+        .map(|engine| InspectionProgressDto::from_engine(&engine))
+        .unwrap_or_else(InspectionProgressDto::idle)
 }
 
 /// Detiene la operación de inspección o relevamiento activa.
@@ -65,35 +78,35 @@ pub fn detener_inspeccion(state: State<AppState>) -> Result<(), String> {
 // INSPECCIÓN DIRECTA DE DISCOS
 // ============================================================================
 
-/// Inspección estática de una única imagen de disco con eventos de progreso
-/// `progreso_inspeccion_directa`; devuelve el informe directo completo.
+/// Inspección estática de una única imagen de disco; devuelve el informe
+/// directo completo y publica el snapshot del motor durante la operación.
 #[tauri::command]
 pub async fn inspeccionar_disco_vm(
-    app: AppHandle,
     state: State<'_, AppState>,
     ruta_disco: String,
     configuracion: Option<ConfiguracionApp>,
 ) -> Result<InformeDirecto, String> {
-    state.preparar_tarea();
-    let cancelacion = state.cancel_requested.clone();
     let config = configuracion.unwrap_or_default();
+    let opciones = construir_opciones(&config, &state.cancel_requested);
+    let (operacion, engine) = state.iniciar_inspeccion(opciones)?;
+    let cancelacion = state.cancel_requested.clone();
     let ruta = ruta_disco.clone();
-    let app_handle = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        inspeccionar_disco(&app_handle, &cancelacion, &ruta, &config)
+        let _operacion = operacion;
+        inspeccionar_disco(&cancelacion, &ruta, &config, &engine)
     })
     .await
     .map_err(|e| format!("Error interno del runtime de tareas: {e}"))?
 }
 
-/// Núcleo de la inspección directa: valida la ruta, ejecuta `vmspect` con
-/// callback de progreso y mapea el informe al DTO del frontend.
+/// Núcleo de la inspección directa: valida la ruta, ejecuta `vmspect` y mapea
+/// el informe al DTO del frontend.
 fn inspeccionar_disco(
-    app: &AppHandle,
     cancelacion: &Arc<AtomicBool>,
     ruta: &str,
     config: &ConfiguracionApp,
+    engine: &vmspect::InspectionEngine,
 ) -> Result<InformeDirecto, String> {
     if cancelacion.load(std::sync::atomic::Ordering::Relaxed) {
         return Err("Inspección cancelada por el usuario.".to_string());
@@ -133,45 +146,11 @@ fn inspeccionar_disco(
 
     let reglas = ReglasClasificacion::cargar(config.ruta_reglas.as_deref());
     // La resolución y ejecución de qemu-nbd pertenecen exclusivamente a vmspect.
-    let opciones = construir_opciones(config, cancelacion);
-
-    let _ = app.emit(
-        "progreso_inspeccion_directa",
-        ProgresoInspeccion {
-            porcentaje: 5,
-            etapa: "Iniciando inspección estática".to_string(),
-            detalle: Some(ruta.to_string()),
-        },
-    );
-
-    let resultado = inspeccionar(&ruta_img, opciones, |ev| {
-        if !cancelacion.load(std::sync::atomic::Ordering::Relaxed) {
-            let _ = app.emit(
-                "progreso_inspeccion_directa",
-                ProgresoInspeccion {
-                    porcentaje: ev.percentage,
-                    etapa: ev.stage,
-                    detalle: ev.detail,
-                },
-            );
-        }
-    });
+    // El motor ya fue publicado para que `inspection_progress` pueda observarlo.
+    let resultado = inspeccionar(engine, &ruta_img);
 
     match resultado {
-        Ok(reporte) => {
-            let _ = app.emit(
-                "progreso_inspeccion_directa",
-                ProgresoInspeccion {
-                    porcentaje: 100,
-                    etapa: "Inspección finalizada".to_string(),
-                    detalle: Some(format!(
-                        "{} programas detectados",
-                        reporte.installed_programs.len()
-                    )),
-                },
-            );
-            Ok(construir_informe_directo(ruta, reporte, &reglas, config))
-        }
+        Ok(reporte) => Ok(construir_informe_directo(ruta, reporte, &reglas, config)),
         Err(vmspect::VmSpectError::Cancelled) => {
             Err("Inspección cancelada por el usuario.".to_string())
         }
@@ -297,16 +276,18 @@ pub async fn consultar_software_en_jsons(
     filtro_vm: Option<String>,
     filtro_version: Option<String>,
     filtro_tipo: Option<String>,
-    filtro_propietario: Option<String>,
+    filtro_responsable: Option<String>,
+    limite_coincidencias: Option<usize>,
 ) -> Result<ResultadoConsultaSoftware, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::consultor::consultar_software_inventario(
+        crate::consultor::consultar_software_inventario_con_limite(
             &directorio,
             filtro_programa,
             filtro_version,
             filtro_vm,
             filtro_tipo,
-            filtro_propietario,
+            filtro_responsable,
+            limite_coincidencias.unwrap_or(30),
         )
     })
     .await
@@ -369,9 +350,7 @@ pub fn obtener_diagnostico() -> Result<DiagnosticoSistema, String> {
         .map(|n| n.get())
         .unwrap_or(4);
     Ok(DiagnosticoSistema {
-        equipo_ejecucion: std::env::var("COMPUTERNAME")
-            .or_else(|_| std::env::var("HOSTNAME"))
-            .unwrap_or_else(|_| "Equipo local".to_string()),
+        equipo_ejecucion: "Equipo local".to_string(),
         sistema_operativo: match std::env::consts::OS {
             "windows" => "Windows".to_string(),
             "linux" => "Linux".to_string(),
@@ -405,36 +384,6 @@ pub fn exportar_informe_individual(
         .map_err(|e| format!("Error al serializar el informe: {e}"))?;
     std::fs::write(&ruta, contenido).map_err(|e| format!("Error al escribir archivo: {e}"))?;
     Ok(format!("Informe exportado exitosamente a: {ruta_destino}"))
-}
-
-/// Abre una carpeta en el explorador de archivos del sistema operativo.
-#[tauri::command]
-pub fn abrir_carpeta(ruta: String) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    {
-        std::process::Command::new("explorer")
-            .arg(&ruta)
-            .spawn()
-            .map_err(|e| format!("Error al abrir carpeta: {e}"))?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        std::process::Command::new("open")
-            .arg(&ruta)
-            .spawn()
-            .map_err(|e| format!("Error al abrir carpeta: {e}"))?;
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        std::process::Command::new("xdg-open")
-            .arg(&ruta)
-            .spawn()
-            .map_err(|e| format!("Error al abrir carpeta: {e}"))?;
-    }
-
-    Ok(())
 }
 
 // ============================================================================
