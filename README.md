@@ -2,11 +2,11 @@
 
 > **Auditoría, relevamiento masivo e inspección estática forense de máquinas virtuales.**
 
-[![Release](https://img.shields.io/badge/Release-v3.2.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v3.2.0)
+[![Release](https://img.shields.io/badge/Release-v3.3.0-blue.svg)](https://github.com/jcostasuarez/vminventory/releases/tag/v3.3.0)
 [![Tauri v2](https://img.shields.io/badge/Tauri-v2.0-blue.svg?logo=tauri)](https://tauri.app/)
 [![Rust](https://img.shields.io/badge/Rust-1.77+-orange.svg?logo=rust)](https://www.rust-lang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0+-646CFF.svg?logo=vite)](https://vitejs.dev/)
-[![Engine](https://img.shields.io/badge/Engine-vmspect_v0.8.0-emerald.svg)](https://crates.io/crates/vmspect)
+[![Engine](https://img.shields.io/badge/Engine-vmspect_v0.9.0-emerald.svg)](https://crates.io/crates/vmspect)
 [![Backend](https://img.shields.io/badge/NBD-qemu--nbd-purple.svg)](#)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](#)
 
@@ -21,10 +21,10 @@
 - **Procesamiento paralelo acotado**: Inicia los lotes con dos workers y solo aumenta la concurrencia mediante una selección explícita.
 - **Tolerancia a fallos**: `vmspect` informa advertencias y conserva resultados parciales sin abortar todo el relevamiento.
 - **Telemetría y supervisión por snapshots**:
-  - El frontend consulta `inspection_progress` cada 400 ms, sin callbacks ni eventos Tauri desde los workers.
+  - El frontend consulta `inspection_progress` cada 400 ms, sin callbacks ni eventos Tauri desde los workers; la telemetría visual se actualiza una vez por segundo.
   - Barra de progreso continuo con interpolación y transiciones suaves (`transition: width 0.5s ease-in-out`).
   - Velocidad estimada (VMs/min) y volumen procesado derivados de las tareas y bytes publicados por el motor.
-  - `vmspect 0.8.0` publica snapshots atómicos de progreso agregado; no expone el detalle por worker ni una bitácora incremental.
+  - `vmspect 0.9.0` publica snapshots atómicos de progreso agregado; no expone el detalle por worker ni una bitácora incremental.
 - **Reportes consolidados**: Genera bases de datos estructuradas en formato JSON y reportes automáticos de discrepancias.
 - **Cancelación segura**: Un token compartido permite detener la operación preservando los resultados ya procesados y sin iniciar nuevas imágenes pendientes.
 
@@ -93,7 +93,7 @@ Al iniciar `procesar_relevamiento`, `AppState` crea y conserva un `Arc` del
 `inspect_batch` sobre esa misma instancia y el comando `inspection_progress`
 consulta `engine.progress().snapshot()`.
 
-El DTO IPC contiene exactamente los campos disponibles en `vmspect 0.8.0`:
+El DTO IPC contiene exactamente los campos disponibles en `vmspect 0.9.0`:
 `completed_tasks`, `total_tasks`, `percentage`, `stage_id`, `bytes_processed`,
 `total_bytes` y `cancelled`. Esta versión identifica la etapa con `stage_id`,
 no con texto ni detalle por VM; la interfaz adapta esos campos y usa valores
@@ -312,6 +312,12 @@ Gracias a la integración con el motor `vmspect` y `qemu-nbd`:
 ---
 
 ## 📝 Changelog
+
+### [v3.3.0] - 2026-09-11 (Telemetría visual y actualización de vmspect)
+- **Motor actualizado:** VM Inventory utiliza `vmspect v0.9.0`, manteniendo el contrato de snapshots de progreso.
+- **Telemetría desacoplada:** el Analizador consulta snapshots cada 400 ms, pero limita el redibujado visual a una vez por segundo para evitar trabajo innecesario.
+- **Supervisión segura:** los intervalos se liberan juntos y las respuestas IPC obsoletas no pueden actualizar una ejecución posterior.
+- **Verificación:** typecheck, contratos frontend/backend y formato Rust verificados antes del empaquetado.
 
 ### [v3.2.0] - 2026-09-11 (Progreso por snapshots y Consultor dinámico)
 - **Motor actualizado:** VM Inventory utiliza `vmspect v0.8.0`, con snapshots atómicos de progreso para relevamientos e inspecciones individuales.

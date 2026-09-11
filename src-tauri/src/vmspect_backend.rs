@@ -70,6 +70,13 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
+    fn bloquea_vmspect_en_la_version_0_9_0() {
+        const CARGO_LOCK: &str = include_str!("../Cargo.lock");
+
+        assert!(CARGO_LOCK.contains("[[package]]\nname = \"vmspect\"\nversion = \"0.9.0\""));
+    }
+
+    #[test]
     fn deja_la_resolucion_y_ejecucion_de_qemu_en_vmspect() {
         let config = ConfiguracionApp {
             forzar_qemu: true,

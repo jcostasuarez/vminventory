@@ -66,7 +66,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "3.2.0"
+version = "3.3.0"
 dependencies = [
  "log",
  "regex",
@@ -4097,9 +4097,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vmspect"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa0f088c8459e8e8bedf989b8c3e609eb44038dd5de410caea5e0b9d2792e7ed"
+checksum = "74e78e6415b678ffd0840db83e80c9e776592f12b649a4be78ba2604db725a51"
 dependencies = [
  "ext4",
  "nt-hive",

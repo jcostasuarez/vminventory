@@ -126,7 +126,7 @@ impl AppState {
 
 /// Snapshot serializable del progreso real de `vmspect`.
 ///
-/// La versión 0.8.0 expone `stage_id`, pero no una descripción ni el detalle de
+/// La versión 0.9.0 expone `stage_id`, pero no una descripción ni el detalle de
 /// cada worker. Esos campos se adaptan a valores neutrales en el frontend.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct InspectionProgressDto {

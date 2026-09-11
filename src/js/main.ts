@@ -522,6 +522,9 @@ interface AnalizadorFlowOptions {
   open: OpenFolder;
 }
 
+const ANALYZER_PROGRESS_POLLING_MS = 400;
+const ANALYZER_VISUAL_REFRESH_MS = 1_000;
+
 export class AnalizadorFlow {
   private readonly ui: UIManager;
   private readonly state: AppState;
@@ -531,9 +534,10 @@ export class AnalizadorFlow {
   private rutaOrigen = '';
   private rutaDestino = '';
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
+  private visualTimer: ReturnType<typeof setInterval> | null = null;
   private progressRequestPending = false;
+  private supervisionRunId = 0;
   private startedAt = 0;
-  private lastProgressKey: string | null = null;
   private lastSnapshot: InspectionProgress | null = null;
 
   constructor({ ui, state, apiClient, operation, open }: AnalizadorFlowOptions) {
@@ -602,44 +606,56 @@ export class AnalizadorFlow {
     }
   }
 
-  /** Libera el polling si la vista se desmonta antes de acabar la operación. */
+  /** Libera la supervisión si la vista se desmonta antes de acabar la operación. */
   dispose(): void {
-    this.detenerPolling();
+    this.detenerSupervision();
   }
 
-  private iniciarPolling(): void {
-    this.detenerPolling();
+  private iniciarSupervision(): void {
+    this.detenerSupervision();
+    const runId = ++this.supervisionRunId;
     this.startedAt = performance.now();
-    this.lastProgressKey = null;
-    this.pollingTimer = setInterval(() => void this.consultarProgreso(), 400);
-    void this.consultarProgreso();
+    this.lastSnapshot = null;
+    this.pollingTimer = setInterval(
+      () => void this.consultarProgreso(runId),
+      ANALYZER_PROGRESS_POLLING_MS
+    );
+    this.visualTimer = setInterval(
+      () => this.actualizarTelemetriaVisual(runId),
+      ANALYZER_VISUAL_REFRESH_MS
+    );
+    this.actualizarTelemetriaVisual(runId);
+    void this.consultarProgreso(runId);
   }
 
   private detenerPolling(): void {
     if (this.pollingTimer !== null) clearInterval(this.pollingTimer);
     this.pollingTimer = null;
+  }
+
+  private detenerSupervision(): void {
+    this.supervisionRunId += 1;
+    this.detenerPolling();
+    if (this.visualTimer !== null) clearInterval(this.visualTimer);
+    this.visualTimer = null;
     this.progressRequestPending = false;
   }
 
-  private async consultarProgreso(): Promise<void> {
-    if (this.progressRequestPending || this.pollingTimer === null) return;
+  private async consultarProgreso(runId: number): Promise<void> {
+    if (
+      runId !== this.supervisionRunId ||
+      this.progressRequestPending ||
+      this.pollingTimer === null
+    ) return;
+
     this.progressRequestPending = true;
     try {
       const snapshot = normalizarInspectionProgress(await this.api.inspectionProgress());
-      const key = [
-        snapshot.completed_tasks,
-        snapshot.total_tasks,
-        snapshot.percentage,
-        snapshot.stage_id,
-        snapshot.bytes_processed,
-        snapshot.total_bytes,
-        snapshot.cancelled
-      ].join(':');
-      if (key !== this.lastProgressKey) {
-        this.lastProgressKey = key;
-        this.lastSnapshot = snapshot;
-        this.ui.actualizarTelemetria(this.adaptarProgreso(snapshot));
-      }
+      if (runId !== this.supervisionRunId) return;
+
+      // Los snapshots se reciben tan pronto como están disponibles, pero su
+      // representación visual se limita al intervalo fijo del cronómetro.
+      this.lastSnapshot = snapshot;
       if (snapshot.total_tasks > 0 && snapshot.completed_tasks >= snapshot.total_tasks) {
         this.detenerPolling();
       }
@@ -647,8 +663,22 @@ export class AnalizadorFlow {
       // Un fallo transitorio de IPC no invalida el resultado final del lote.
       console.warn('No se pudo consultar el progreso del relevamiento:', error);
     } finally {
-      this.progressRequestPending = false;
+      if (runId === this.supervisionRunId) this.progressRequestPending = false;
     }
+  }
+
+  private actualizarTelemetriaVisual(runId: number): void {
+    if (runId !== this.supervisionRunId || this.visualTimer === null) return;
+    const snapshot = this.lastSnapshot ?? {
+      completed_tasks: 0,
+      total_tasks: 0,
+      percentage: 0,
+      stage_id: 0,
+      bytes_processed: 0,
+      total_bytes: 0,
+      cancelled: false
+    };
+    this.ui.actualizarTelemetria(this.adaptarProgreso(snapshot));
   }
 
   private adaptarProgreso(snapshot: InspectionProgress): EstadoSupervision {
@@ -752,7 +782,7 @@ export class AnalizadorFlow {
       generarDiscrepancias: config.generar_discrepancias,
       configuracion: this.state.obtenerPayloadAnalizador()
     });
-    this.iniciarPolling();
+    this.iniciarSupervision();
     try {
       const resumen = await relevamiento;
       this.actualizarTelemetriaFinal(resumen);
@@ -771,7 +801,7 @@ export class AnalizadorFlow {
       this.ui.mostrarErrorAnalizador(error);
       return null;
     } finally {
-      this.detenerPolling();
+      this.detenerSupervision();
       this.operation.finish('analizador');
       this.ui.setEstadoAnalizador(false);
       this.actualizarPasos();

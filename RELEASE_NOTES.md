@@ -1,3 +1,48 @@
+# VM Inventory v3.3.0 - Telemetría visual y actualización de vmspect
+
+## 🚀 Resumen del lanzamiento
+
+La versión menor `v3.3.0` actualiza `vmspect` a `v0.9.0` y desacopla la frecuencia de consulta de snapshots de la frecuencia de redibujado visual del Analizador. El cambio reduce trabajo innecesario en la interfaz sin alterar el contrato funcional de progreso ni introducir cambios rompientes.
+
+## 🔧 Cambios principales
+
+- **Motor actualizado:** `vmspect v0.9.0` queda fijado en Cargo y sus contratos backend verifican la versión utilizada.
+- **Telemetría eficiente:** el Analizador consulta snapshots cada 400 ms, pero actualiza la representación visual una vez por segundo.
+- **Supervisión segura:** se separan los temporizadores de consulta y presentación, se liberan al finalizar o desmontar la vista y se ignoran respuestas IPC de ejecuciones obsoletas.
+- **Documentación sincronizada:** Cargo, Tauri, npm, lockfiles, README y los artefactos Windows se publican como `v3.3.0`.
+
+## 📦 Artefactos de descarga
+
+| Plataforma | Artefacto | Tamaño | Descripción |
+| :--- | :--- | ---: | :--- |
+| **Windows x64** | `VM Inventory_3.3.0_x64-setup.exe` | 2,865,540 bytes | Instalador NSIS estándar para Windows 10/11 |
+| **Windows x64** | `VM Inventory_3.3.0_x64_en-US.msi` | 4,272,128 bytes | Paquete MSI para despliegue empresarial |
+| **Código fuente** | `v3.3.0.tar.gz` / `v3.3.0.zip` | — | Generados automáticamente por GitHub al publicar el tag |
+
+## 🔒 Integridad SHA-256
+
+| Artefacto | SHA-256 |
+| :--- | :--- |
+| `VM Inventory_3.3.0_x64-setup.exe` | `f71199e6b90ea6f1e945b5b27665a4261e3c08263dba0ef15e806ae532ed6930` |
+| `VM Inventory_3.3.0_x64_en-US.msi` | `aa16015fc30851671d7c23fa14d92ec9521ee23f104b79b798c083bd32485254` |
+
+Los hashes fueron calculados después de generar y validar los instaladores.
+
+## ✅ Verificación del release
+
+- `npm run typecheck`
+- `npm test`: 12 contratos frontend, 14 pruebas unitarias y 4 contratos backend aprobados.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- `npm run build`
+- `npm run tauri build`: bundles NSIS y MSI Windows x64 generados correctamente con `vmspect v0.9.0`.
+
+Los instaladores se generan en:
+
+- `src-tauri/target/release/bundle/nsis/VM Inventory_3.3.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/VM Inventory_3.3.0_x64_en-US.msi`
+
+---
+
 # VM Inventory v3.2.0 - Progreso por snapshots y Consultor dinámico
 
 ## 🚀 Resumen del lanzamiento

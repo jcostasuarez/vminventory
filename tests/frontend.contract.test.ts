@@ -112,16 +112,16 @@ describe('Contratos agnósticos del frontend', () => {
     ]);
   });
 
-  it('consulta y limpia un único polling del relevamiento', async () => {
+  it('actualiza la telemetría del Analizador una vez por segundo y libera sus intervalos', async () => {
     const storage = new MemoryStorage();
     const state = new AppState(storage);
     const operation = new OperationState();
-    const telemetria: unknown[] = [];
+    const telemetria: InspectionProgress[] = [];
     const ui = {
       sincronizarConfiguracionAnalizador: () => {},
       actualizarPasos: () => {},
       setEstadoAnalizador: () => {},
-      actualizarTelemetria: (estado: unknown) => telemetria.push(estado),
+      actualizarTelemetria: (estado: unknown) => telemetria.push(estado as InspectionProgress),
       renderResumenRelevamiento: () => {},
       mostrarErrorAnalizador: () => {}
     } as never;
@@ -147,13 +147,19 @@ describe('Contratos agnósticos del frontend', () => {
     } as unknown as AppApi;
     const originalSetInterval = globalThis.setInterval;
     const originalClearInterval = globalThis.clearInterval;
-    let tick: (() => void) | null = null;
+    const intervalos = new Map<number, () => void>();
+    const periodos: number[] = [];
+    let siguienteIntervalo = 1;
     let intervalosLimpios = 0;
-    globalThis.setInterval = ((callback: () => void) => {
-      tick = callback;
-      return 1;
+    globalThis.setInterval = ((callback: () => void, periodo: number) => {
+      const id = siguienteIntervalo++;
+      intervalos.set(id, callback);
+      periodos.push(periodo);
+      return id;
     }) as unknown as typeof setInterval;
-    globalThis.clearInterval = (() => { intervalosLimpios += 1; }) as typeof clearInterval;
+    globalThis.clearInterval = ((id: number) => {
+      if (intervalos.delete(id)) intervalosLimpios += 1;
+    }) as unknown as typeof clearInterval;
 
     try {
       const flow = new AnalizadorFlow({
@@ -169,12 +175,22 @@ describe('Contratos agnósticos del frontend', () => {
       const ejecucion = flow.ejecutar();
       await Promise.resolve();
       await Promise.resolve();
+      assert.deepEqual(periodos, [400, 1_000]);
       assert.equal(consultas, 1);
-      assert.equal(telemetria.length, 1);
-      (tick as (() => void) | null)?.();
+      assert.equal(telemetria.length, 1, 'el primer dibujo establece el estado inicial');
+
+      intervalos.get(1)?.();
       await Promise.resolve();
       await Promise.resolve();
-      assert.equal(telemetria.length, 1, 'los snapshots idénticos se deduplican');
+      assert.equal(consultas, 2);
+      assert.equal(
+        telemetria.length,
+        1,
+        'recibir snapshots no desencadena actualizaciones visuales adicionales'
+      );
+
+      intervalos.get(2)?.();
+      assert.equal(telemetria.length, 2, 'solo el intervalo visual de un segundo redibuja');
 
       resolver({
         fase: 'finalizado', total_vms: 2, vms_exitosas: 1,
@@ -183,10 +199,10 @@ describe('Contratos agnósticos del frontend', () => {
         ruta_informe: 'destino/reporte.json', cancelado: false, metricas: {}
       });
       await ejecucion;
-      assert.equal(intervalosLimpios, 1);
-      assert.equal(telemetria.length, 2, 'el resultado final actualiza la telemetría');
+      assert.equal(intervalosLimpios, 2, 'se liberan polling y refresco visual al finalizar');
+      assert.equal(intervalos.size, 0);
       flow.dispose();
-      assert.equal(intervalosLimpios, 1, 'no queda un intervalo activo al desmontar');
+      assert.equal(intervalosLimpios, 2, 'no intenta liberar temporizadores ya detenidos');
     } finally {
       globalThis.setInterval = originalSetInterval;
       globalThis.clearInterval = originalClearInterval;
