@@ -1,3 +1,55 @@
+# VM Inventory v4.1.0 - Actualizaciones firmadas y layout adaptable
+
+## 🚀 Resumen del lanzamiento
+
+`v4.1.0` incorpora el updater firmado de Tauri para distribuir actualizaciones
+verificables desde GitHub y mejora el layout adaptable del Consultor para
+aprovechar correctamente el ancho disponible.
+
+## ✨ Cambios principales
+
+### Added
+
+- **Actualizaciones firmadas:** integración de `tauri-plugin-updater`, capability
+de escritorio y artefactos de actualización firmados para Windows x64.
+- **Distribución:** metadata `latest.json` para el endpoint de actualización de
+GitHub.
+
+### Changed
+
+- **Frontend:** el viewport, las vistas del Consultor y las tablas utilizan el
+ancho disponible sin restricciones fijas innecesarias.
+- **Configuración:** versión sincronizada como `4.1.0` en npm, Tauri y Cargo.
+
+### Technical
+
+- Se actualizan los lockfiles para incluir el plugin del updater y sus
+transitivas.
+- Se conserva la clave pública del updater en `src-tauri/tauri.conf.json`; la
+clave privada no forma parte del repositorio.
+
+## 🔒 Integridad SHA-256
+
+| Artefacto | SHA-256 |
+| :--- | :--- |
+| `VM Inventory_4.1.0_x64-setup.exe` | `2106abdb9ba959fdfcc7bbf71f49cc9d253b1562bee2c46a39e899e80b2c3f6b` |
+| `VM Inventory_4.1.0_x64-setup.exe.sig` | `704292f797e1c369b18b1989fbe079d51a07bbbc5792fb2cc8c9fbf3ba3af4e4` |
+| `VM Inventory_4.1.0_x64_en-US.msi` | `11e72cf585c5c39142d0d3459a90ac7075104fe4e5a4149e1c27658ffe2cf049` |
+| `VM Inventory_4.1.0_x64_en-US.msi.sig` | `70abbac8c7365915a3dcdd8306fa287be5bf3ca64df8d477efa7a77be01d2ec5` |
+
+## 📦 Instalación y actualización
+
+- **Compatibilidad:** Windows x64, mediante instalador NSIS o MSI.
+- **Instalación manual:** descargar `VM Inventory_4.1.0_x64-setup.exe` o el
+paquete MSI desde la release.
+- **Actualización:** el updater de Tauri usa `latest.json` y verifica la firma
+del instalador NSIS antes de aplicar la actualización.
+
+No hay commits posteriores a `v4.0.0`; esta release recoge los cambios locales
+preparados para `4.1.0`.
+
+---
+
 # VM Inventory v4.0.0 - Consultor visual, agrupación y contrato de reglas renovado
 
 ## 🚀 Resumen del lanzamiento

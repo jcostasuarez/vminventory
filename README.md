@@ -377,6 +377,24 @@ npm test
 | `npm run typecheck` | Valida TypeScript sin emitir archivos. |
 | `npm run tauri build` | Genera los artefactos de distribución. |
 
+### Actualizaciones firmadas
+
+El updater de Tauri está habilitado para Windows, Linux y macOS. Los builds generan
+artefactos de actualización y sus firmas cuando se proporciona la clave privada
+fuera del repositorio. En PowerShell:
+
+```powershell
+$env:TAURI_SIGNING_PRIVATE_KEY_PATH = 'C:\Users\<usuario>\.tauri\vm-inventory.key'
+# Solo si la clave privada tiene contraseña:
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = '...'
+npm run tauri build
+```
+
+No se debe guardar la clave privada en el repositorio ni en un archivo `.env`.
+La clave pública está en `src-tauri/tauri.conf.json`. El endpoint configurado
+espera `latest.json` y los artefactos firmados en la release más reciente de
+GitHub; esos archivos deben publicarse como parte del release.
+
 ## Estructura relevante
 
 ```text

@@ -49,6 +49,11 @@ pub fn run() {
             ventana_cerrar,
         ])
         .setup(|app| {
+            #[cfg(desktop)]
+            let _ = app
+                .handle()
+                .plugin(tauri_plugin_updater::Builder::new().build());
+
             // Inicialización automática de archivo de reglas si no existe
             let _ = clasificacion::asegurar_archivo_predeterminado();
 

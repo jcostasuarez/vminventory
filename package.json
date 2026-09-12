@@ -1,7 +1,7 @@
 {
   "name": "vminventory",
   "private": true,
-  "version": "4.0.0",
+  "version": "4.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,6 +17,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.3",
+    "@tauri-apps/plugin-updater": "^2.11.0",
     "d3-force": "^3.0.0",
     "d3-polygon": "^3.0.1"
   },
