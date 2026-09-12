@@ -4,8 +4,8 @@
 //! inventario. Cada subcarpeta legible define dinámicamente un tipo.
 
 use crate::models::{
-    BdRelevamiento, CoincidenciaSoftware, InformeDirecto, ProgramaClasificado, RegistroVM,
-    ResultadoConsultaSoftware,
+    BdRelevamiento, CoincidenciaSoftware, CriterioAgrupacion, GrupoSoftware, InformeDirecto,
+    ProgramaClasificado, RegistroVM, ResultadoConsultaSoftware, ResumenGrupoSoftware,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -235,6 +235,107 @@ pub fn recolectar_archivos_json(directorio_raiz: &Path) -> Result<Vec<ArchivoRep
     Ok(resultado)
 }
 
+fn valor_agrupacion(item: &CoincidenciaSoftware, criterio: &CriterioAgrupacion) -> String {
+    let valor = match criterio {
+        CriterioAgrupacion::MaquinaVirtual => Some(item.nombre_vm.as_str()),
+        CriterioAgrupacion::Categoria => item.categoria.as_deref(),
+        CriterioAgrupacion::SistemaOperativo => Some(item.sistema_operativo.as_str()),
+        CriterioAgrupacion::Responsable => item.responsable.as_deref(),
+        CriterioAgrupacion::Tipo => Some(item.tipo.as_str()),
+        CriterioAgrupacion::SinAgrupar => None,
+    };
+    sanitizar_opcion(valor).unwrap_or_else(|| "Sin información".to_string())
+}
+
+fn clave_agrupacion(valor: &str, criterio: &CriterioAgrupacion) -> String {
+    let criterio = match criterio {
+        CriterioAgrupacion::MaquinaVirtual => "maquina-virtual",
+        CriterioAgrupacion::Categoria => "categoria",
+        CriterioAgrupacion::SistemaOperativo => "sistema-operativo",
+        CriterioAgrupacion::Responsable => "responsable",
+        CriterioAgrupacion::Tipo => "tipo",
+        CriterioAgrupacion::SinAgrupar => "sin-agrupar",
+    };
+    format!("{criterio}:{}", valor.trim().to_lowercase())
+}
+
+fn resumen_grupo(tarjetas: &[CoincidenciaSoftware]) -> ResumenGrupoSoftware {
+    let mut sistemas_operativos = BTreeSet::new();
+    let mut responsables = BTreeSet::new();
+    let mut categorias = BTreeSet::new();
+    for tarjeta in tarjetas {
+        if let Some(valor) = sanitizar_opcion(Some(&tarjeta.sistema_operativo)) {
+            sistemas_operativos.insert(valor);
+        }
+        if let Some(valor) = sanitizar_opcion(tarjeta.responsable.as_deref()) {
+            responsables.insert(valor);
+        }
+        if let Some(valor) = sanitizar_opcion(tarjeta.categoria.as_deref()) {
+            categorias.insert(valor);
+        }
+    }
+    ResumenGrupoSoftware {
+        sistemas_operativos: sistemas_operativos.into_iter().collect(),
+        responsables: responsables.into_iter().collect(),
+        categorias: categorias.into_iter().collect(),
+    }
+}
+
+/// Ordena grupos por su etiqueta de presentación, sin modificar sus tarjetas internas.
+pub fn ordenar_grupos(grupos: &mut [GrupoSoftware]) {
+    grupos.sort_by(|a, b| {
+        a.valor
+            .to_lowercase()
+            .cmp(&b.valor.to_lowercase())
+            .then_with(|| a.valor.cmp(&b.valor))
+    });
+}
+
+/// Agrupa sin reordenar las tarjetas: el orden de cada grupo es el del resultado filtrado.
+pub fn agrupar_coincidencias(
+    tarjetas: Vec<CoincidenciaSoftware>,
+    criterio: CriterioAgrupacion,
+) -> Vec<GrupoSoftware> {
+    let mut indices_por_clave: BTreeMap<String, usize> = BTreeMap::new();
+    let mut grupos: Vec<GrupoSoftware> = Vec::new();
+    for tarjeta in tarjetas {
+        let valor = valor_agrupacion(&tarjeta, &criterio);
+        let clave = clave_agrupacion(&valor, &criterio);
+        if let Some(&indice) = indices_por_clave.get(&clave) {
+            grupos[indice].tarjetas.push(tarjeta);
+        } else {
+            indices_por_clave.insert(clave.clone(), grupos.len());
+            grupos.push(GrupoSoftware {
+                clave,
+                valor,
+                criterio: criterio.clone(),
+                cantidad_tarjetas: 0,
+                resumen: ResumenGrupoSoftware::default(),
+                tarjetas: vec![tarjeta],
+            });
+        }
+    }
+    for grupo in &mut grupos {
+        grupo.cantidad_tarjetas = grupo.tarjetas.len();
+        grupo.resumen = resumen_grupo(&grupo.tarjetas);
+    }
+    ordenar_grupos(&mut grupos);
+    grupos
+}
+
+/// Pagina grupos completos para consumidores que requieran esa vista explícita.
+pub fn paginar_grupos(
+    mut grupos: Vec<GrupoSoftware>,
+    pagina: usize,
+    limite: usize,
+) -> Vec<GrupoSoftware> {
+    let inicio = pagina.saturating_sub(1).saturating_mul(limite);
+    if inicio >= grupos.len() {
+        return Vec::new();
+    }
+    grupos.drain(inicio..).take(limite).collect()
+}
+
 pub fn consultar_software_inventario(
     directorio: &str,
     filtro_programa: Option<String>,
@@ -254,6 +355,7 @@ pub fn consultar_software_inventario(
     )
 }
 
+/// API compatible con los consumidores internos anteriores: consulta sin agrupar.
 pub fn consultar_software_inventario_con_limite(
     directorio: &str,
     filtro_programa: Option<String>,
@@ -262,6 +364,34 @@ pub fn consultar_software_inventario_con_limite(
     filtro_tipo: Option<String>,
     filtro_responsable: Option<String>,
     limite_coincidencias: usize,
+) -> Result<ResultadoConsultaSoftware, String> {
+    consultar_software_inventario_con_agrupacion(
+        directorio,
+        filtro_programa,
+        filtro_version,
+        filtro_vm,
+        filtro_tipo,
+        filtro_responsable,
+        limite_coincidencias,
+        CriterioAgrupacion::SinAgrupar,
+        1,
+    )
+}
+
+/// Devuelve todas las coincidencias resultantes de los filtros, agrupadas si corresponde.
+///
+/// `_limite_coincidencias` y `_pagina` se conservan en la API por compatibilidad,
+/// pero no se aplican al resultado: cada grupo incluye todas sus tarjetas.
+pub fn consultar_software_inventario_con_agrupacion(
+    directorio: &str,
+    filtro_programa: Option<String>,
+    filtro_version: Option<String>,
+    filtro_vm: Option<String>,
+    filtro_tipo: Option<String>,
+    filtro_responsable: Option<String>,
+    _limite_coincidencias: usize,
+    criterio_agrupacion: CriterioAgrupacion,
+    _pagina: usize,
 ) -> Result<ResultadoConsultaSoftware, String> {
     let ruta = Path::new(directorio);
     if !ruta.is_dir() {
@@ -283,7 +413,6 @@ pub fn consultar_software_inventario_con_limite(
         filtro_responsable,
     );
     let hay_filtros = filtros.hay_filtros_activos();
-    let limite_coincidencias = limite_coincidencias.clamp(10, 100);
 
     let mut coincidencias = Vec::new();
     let mut programas = BTreeSet::new();
@@ -387,10 +516,7 @@ pub fn consultar_software_inventario_con_limite(
                     }
                 }
 
-                if hay_filtros
-                    && filtros.cumple(&vm, programa)
-                    && coincidencias.len() < limite_coincidencias
-                {
+                if hay_filtros && filtros.cumple(&vm, programa) {
                     coincidencias.push(CoincidenciaSoftware {
                         nombre_programa: programa.nombre.clone(),
                         version: sanitizar_opcion(programa.version.as_deref()),
@@ -414,6 +540,23 @@ pub fn consultar_software_inventario_con_limite(
         }
     }
 
+    let total_coincidencias = coincidencias.len();
+    let total_vms_involucradas = coincidencias
+        .iter()
+        .map(|item| {
+            sanitizar_opcion(Some(&item.ruta_carpeta)).unwrap_or_else(|| item.nombre_vm.clone())
+        })
+        .collect::<BTreeSet<_>>()
+        .len();
+    let (coincidencias, grupos, total_grupos) =
+        if criterio_agrupacion == CriterioAgrupacion::SinAgrupar {
+            (coincidencias, None, None)
+        } else {
+            let grupos = agrupar_coincidencias(coincidencias, criterio_agrupacion);
+            let total_grupos = Some(grupos.len());
+            (Vec::new(), Some(grupos), total_grupos)
+        };
+
     Ok(ResultadoConsultaSoftware {
         total_archivos_json: archivos_info.len(),
         total_vms_escaneadas,
@@ -429,6 +572,10 @@ pub fn consultar_software_inventario_con_limite(
         categorias_disponibles: categorias.into_iter().collect(),
         tags_disponibles: tags.into_iter().collect(),
         coincidencias,
+        grupos,
+        total_coincidencias,
+        total_grupos,
+        total_vms_involucradas,
     })
 }
 
@@ -524,6 +671,122 @@ mod tests {
             Some("reporte".to_string())
         );
         fs::remove_dir_all(raiz).unwrap();
+    }
+
+    fn coincidencia(
+        nombre: &str,
+        vm: &str,
+        categoria: Option<&str>,
+        so: &str,
+        responsable: Option<&str>,
+        tipo: &str,
+    ) -> CoincidenciaSoftware {
+        CoincidenciaSoftware {
+            nombre_programa: nombre.to_string(),
+            version: None,
+            editor: None,
+            categoria: categoria.map(str::to_string),
+            tags: Vec::new(),
+            nombre_vm: vm.to_string(),
+            nombre_interno: None,
+            ruta_carpeta: format!("/vms/{vm}"),
+            responsable: responsable.map(str::to_string),
+            tipo: tipo.to_string(),
+            sistema_operativo: so.to_string(),
+            peso_gb: 0.0,
+            hipervisor: None,
+            discrepante: None,
+            archivo_json: String::new(),
+            fecha_relevamiento: String::new(),
+        }
+    }
+
+    #[test]
+    fn agrupa_resultados_filtrados_con_fallback_orden_y_paginacion() {
+        let tarjetas = vec![
+            coincidencia(
+                "Chrome 120",
+                "VM-01",
+                Some("Navegadores"),
+                "Windows 11",
+                Some("Equipo A"),
+                "Producción",
+            ),
+            coincidencia(
+                "Chrome 121",
+                "VM-01",
+                Some("Navegadores"),
+                "Windows 11",
+                Some("Equipo A"),
+                "Producción",
+            ),
+            coincidencia("Chrome 119", "VM-02", None, "Linux", None, "Pruebas"),
+            coincidencia(
+                "Chrome 120",
+                "VM-03",
+                Some("Navegadores"),
+                "Windows 11",
+                Some("Equipo B"),
+                "Pruebas",
+            ),
+        ];
+
+        let por_vm = agrupar_coincidencias(tarjetas.clone(), CriterioAgrupacion::MaquinaVirtual);
+        assert_eq!(
+            por_vm
+                .iter()
+                .map(|grupo| grupo.valor.as_str())
+                .collect::<Vec<_>>(),
+            vec!["VM-01", "VM-02", "VM-03"]
+        );
+        assert_eq!(por_vm[0].cantidad_tarjetas, 2);
+        assert_eq!(
+            por_vm[0]
+                .tarjetas
+                .iter()
+                .map(|tarjeta| tarjeta.nombre_programa.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Chrome 120", "Chrome 121"]
+        );
+        assert_eq!(por_vm[0].resumen.sistemas_operativos, vec!["Windows 11"]);
+
+        let por_categoria = agrupar_coincidencias(tarjetas.clone(), CriterioAgrupacion::Categoria);
+        assert_eq!(
+            por_categoria
+                .iter()
+                .map(|grupo| (grupo.valor.as_str(), grupo.cantidad_tarjetas))
+                .collect::<Vec<_>>(),
+            vec![("Navegadores", 3), ("Sin información", 1)]
+        );
+        assert_eq!(
+            agrupar_coincidencias(tarjetas.clone(), CriterioAgrupacion::SistemaOperativo).len(),
+            2
+        );
+        assert_eq!(
+            agrupar_coincidencias(tarjetas.clone(), CriterioAgrupacion::Responsable)
+                .last()
+                .map(|grupo| grupo.valor.as_str()),
+            Some("Sin información")
+        );
+        assert_eq!(
+            agrupar_coincidencias(tarjetas.clone(), CriterioAgrupacion::Tipo).len(),
+            2
+        );
+        assert!(agrupar_coincidencias(Vec::new(), CriterioAgrupacion::MaquinaVirtual).is_empty());
+
+        let pagina = paginar_grupos(por_vm, 2, 1);
+        assert_eq!(pagina.len(), 1);
+        assert_eq!(pagina[0].valor, "VM-02");
+        assert_eq!(pagina[0].cantidad_tarjetas, 1);
+
+        assert_eq!(
+            CriterioAgrupacion::desde_valor(Some("invalido")),
+            CriterioAgrupacion::SinAgrupar
+        );
+        assert_eq!(
+            CriterioAgrupacion::desde_valor(None),
+            CriterioAgrupacion::SinAgrupar
+        );
     }
 
     #[test]

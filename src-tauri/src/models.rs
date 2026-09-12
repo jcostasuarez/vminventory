@@ -371,7 +371,7 @@ pub struct ProgramaClasificado {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct InfoReglas {
     pub origen_reglas: String,
-    pub total_whitelist: usize,
+    pub total_noise: usize,
     pub categorias: BTreeMap<String, usize>,
     #[serde(default)]
     pub total_clasificaciones: usize,
@@ -385,7 +385,6 @@ pub struct InfoReglas {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ResultadoClasificacion {
     pub es_relevante: bool,
-    pub es_whitelist: bool,
     pub motivo_veredicto: String,
     pub categoria: Option<String>,
     pub tags: Vec<String>,
@@ -588,6 +587,50 @@ pub struct CoincidenciaSoftware {
     pub fecha_relevamiento: String,
 }
 
+/// Criterio con el que el Consultor puede organizar sus coincidencias.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CriterioAgrupacion {
+    SinAgrupar,
+    MaquinaVirtual,
+    Categoria,
+    SistemaOperativo,
+    Responsable,
+    Tipo,
+}
+
+impl CriterioAgrupacion {
+    pub fn desde_valor(valor: Option<&str>) -> Self {
+        match valor.map(str::trim) {
+            Some("maquina-virtual") => Self::MaquinaVirtual,
+            Some("categoria") => Self::Categoria,
+            Some("sistema-operativo") => Self::SistemaOperativo,
+            Some("responsable") => Self::Responsable,
+            Some("tipo") => Self::Tipo,
+            _ => Self::SinAgrupar,
+        }
+    }
+}
+
+/// Información agregada de las tarjetas que componen un grupo.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct ResumenGrupoSoftware {
+    pub sistemas_operativos: Vec<String>,
+    pub responsables: Vec<String>,
+    pub categorias: Vec<String>,
+}
+
+/// Grupo de coincidencias ya filtradas, listo para ser renderizado por el cliente.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct GrupoSoftware {
+    pub clave: String,
+    pub valor: String,
+    pub criterio: CriterioAgrupacion,
+    pub cantidad_tarjetas: usize,
+    pub resumen: ResumenGrupoSoftware,
+    pub tarjetas: Vec<CoincidenciaSoftware>,
+}
+
 /// Respuesta completa del consultor con totales, sugerencias y coincidencias.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ResultadoConsultaSoftware {
@@ -601,7 +644,14 @@ pub struct ResultadoConsultaSoftware {
     pub tipos_disponibles: Vec<String>,
     pub categorias_disponibles: Vec<String>,
     pub tags_disponibles: Vec<String>,
+    /// Se conserva para los consumidores anteriores y para el modo sin agrupar.
     pub coincidencias: Vec<CoincidenciaSoftware>,
+    /// `supertarjetas` se acepta únicamente al leer respuestas históricas.
+    #[serde(alias = "supertarjetas")]
+    pub grupos: Option<Vec<GrupoSoftware>>,
+    pub total_coincidencias: usize,
+    pub total_grupos: Option<usize>,
+    pub total_vms_involucradas: usize,
 }
 
 // ============================================================================

@@ -5,7 +5,7 @@ use app_lib::clasificacion::{
     ReglasArchivo, ReglasClasificacion,
 };
 use app_lib::consultor::{sanitizar_opcion, texto_coincide, FiltrosConsultor};
-use app_lib::models::AppState;
+use app_lib::models::{AppState, CriterioAgrupacion, ResultadoConsultaSoftware};
 use app_lib::relevamiento::formatear_duracion;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -64,11 +64,6 @@ fn el_motor_de_patrones_y_reglas_es_determinista() {
                 category: Some("Analytics".to_string()),
                 tags: vec!["data".to_string()],
             }],
-            whitelist: vec![EntradaPatron {
-                patron: "Critical Tool".to_string(),
-                editor: None,
-                motivo: "Fixture prioritario".to_string(),
-            }],
             noise: vec![EntradaPatron {
                 patron: "Telemetry Agent".to_string(),
                 editor: None,
@@ -81,10 +76,6 @@ fn el_motor_de_patrones_y_reglas_es_determinista() {
             }],
         },
     );
-
-    let whitelisted = reglas.clasificar("Critical Tool", None);
-    assert!(whitelisted.es_relevante);
-    assert!(whitelisted.es_whitelist);
 
     let ignored = reglas.clasificar("Telemetry Agent", None);
     assert!(!ignored.es_relevante);
@@ -245,6 +236,94 @@ fn consulta_reportes_json_sinteticos_entrega_el_contrato_del_consultor() {
         filtered.coincidencias[0].responsable.as_deref(),
         Some("cluster a")
     );
+
+    let ungrouped = app_lib::consultor::consultar_software_inventario_con_limite(
+        directory.path().to_str().expect("Ruta temporal válida"),
+        Some("Example".to_string()),
+        None,
+        None,
+        None,
+        None,
+        1,
+    )
+    .expect("La consulta sin agrupar debe ser válida");
+    assert_eq!(ungrouped.total_coincidencias, 2);
+    assert_eq!(
+        ungrouped
+            .coincidencias
+            .iter()
+            .map(|tarjeta| tarjeta.nombre_programa.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Example Service", "Example Tool"]
+    );
+
+    let criterios_agrupacion = [
+        ("máquina virtual", CriterioAgrupacion::MaquinaVirtual),
+        ("categoría", CriterioAgrupacion::Categoria),
+        ("sistema operativo", CriterioAgrupacion::SistemaOperativo),
+        ("responsable", CriterioAgrupacion::Responsable),
+        ("tipo", CriterioAgrupacion::Tipo),
+    ];
+    let mut agrupada_por_vm = None;
+    for (nombre, criterio) in criterios_agrupacion {
+        let es_por_vm = criterio == CriterioAgrupacion::MaquinaVirtual;
+        let grouped = app_lib::consultor::consultar_software_inventario_con_agrupacion(
+            directory.path().to_str().expect("Ruta temporal válida"),
+            Some("Example".to_string()),
+            None,
+            None,
+            None,
+            None,
+            10,
+            criterio,
+            2,
+        )
+        .expect("Cada consulta agrupada debe ser válida");
+        let grupos = grouped
+            .grupos
+            .as_ref()
+            .expect("La consulta agrupada debe incluir grupos");
+
+        assert!(grouped.coincidencias.is_empty());
+        assert_eq!(grouped.total_coincidencias, 2, "criterio: {nombre}");
+        assert_eq!(
+            grupos
+                .iter()
+                .map(|grupo| grupo.tarjetas.len())
+                .sum::<usize>(),
+            2,
+            "criterio: {nombre}"
+        );
+
+        if es_por_vm {
+            assert_eq!(grouped.total_grupos, Some(2));
+            assert_eq!(grupos.len(), 2);
+            assert_eq!(
+                grupos
+                    .iter()
+                    .flat_map(|grupo| grupo.tarjetas.iter())
+                    .map(|tarjeta| tarjeta.nombre_programa.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["Example Service", "Example Tool"]
+            );
+            agrupada_por_vm = Some(grouped);
+        }
+    }
+
+    let grouped = agrupada_por_vm.expect("Debe conservarse la respuesta agrupada por VM");
+    let mut respuesta_historica =
+        serde_json::to_value(&grouped).expect("La respuesta agrupada debe serializarse");
+    let objeto = respuesta_historica
+        .as_object_mut()
+        .expect("La respuesta serializada debe ser un objeto");
+    let grupos = objeto
+        .remove("grupos")
+        .expect("La respuesta agrupada debe incluir grupos");
+    objeto.insert("supertarjetas".to_string(), grupos);
+    let respuesta_historica: ResultadoConsultaSoftware =
+        serde_json::from_value(respuesta_historica)
+            .expect("El alias histórico supertarjetas debe seguir siendo compatible");
+    assert_eq!(respuesta_historica.grupos.as_ref().map(Vec::len), Some(2));
 
     let by_owner = app_lib::consultor::consultar_software_inventario(
         directory.path().to_str().expect("Ruta temporal válida"),

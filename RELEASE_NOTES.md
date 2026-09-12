@@ -1,3 +1,66 @@
+# VM Inventory v4.0.0 - Consultor visual, agrupación y contrato de reglas renovado
+
+## 🚀 Resumen del lanzamiento
+
+`v4.0.0` incorpora nuevas vistas de tabla y mapa para el Consultor, agrupación
+backend por múltiples criterios y filtrado directo desde tarjetas y celdas.
+También actualiza el contrato de clasificación y la precedencia de reglas.
+
+## ⚠️ Cambios rompientes
+
+- Se elimina la configuración `whitelist` integrada y externa; el ruido del
+  sistema se descarta antes de cualquier clasificación.
+- Se elimina el campo `es_whitelist` del resultado de clasificación.
+- El comando de consulta admite agrupación y paginación, y las respuestas
+  agrupadas usan `grupos` con compatibilidad de lectura para datos históricos.
+- Los consumidores de `rules.json` y del contrato IPC deben actualizarse antes
+  de adoptar esta versión.
+
+## ✨ Cambios principales
+
+- **Consultor:** vistas de tarjetas, tabla ordenable y mapa relacional con
+  límites de rendimiento, selección accesible y filtros desde resultados.
+- **Agrupación:** agrupación por máquina virtual, categoría, sistema operativo,
+  responsable o tipo, conservando el orden de las tarjetas dentro de cada grupo.
+- **Backend:** nuevos DTOs, resumen de grupos, paginación y contratos de prueba
+  para consultas agrupadas.
+- **Reglas:** simplificación del modelo de patrones y nueva precedencia para
+  descartar ruido del sistema antes de clasificar.
+- **Frontend:** nuevos estilos, controles de agrupación y dependencias D3 para
+  el mapa del Consultor.
+
+## 📦 Artefactos de descarga
+
+| Plataforma | Artefacto | Tamaño | Descripción |
+| :--- | :--- | ---: | :--- |
+| **Windows x64** | `VM Inventory_4.0.0_x64-setup.exe` | 2,891,069 bytes | Instalador NSIS estándar para Windows 10/11 |
+| **Windows x64** | `VM Inventory_4.0.0_x64_en-US.msi` | 4,304,896 bytes | Paquete MSI para despliegue empresarial |
+| **Código fuente** | `v4.0.0.tar.gz` / `v4.0.0.zip` | — | Generados automáticamente por GitHub al publicar el tag |
+
+## 🔒 Integridad SHA-256
+
+| Artefacto | SHA-256 |
+| :--- | :--- |
+| `VM Inventory_4.0.0_x64-setup.exe` | `71966312632cb3769ebdd7a70e7b328ef399a3e639262f82b4ac2479de2350ec` |
+| `VM Inventory_4.0.0_x64_en-US.msi` | `f7342bbf2144c0ccc308a7d813a9d7cd53c4a6c2026f3ea44f5223f3173a5fc7` |
+
+Los hashes fueron calculados después de generar y validar los instaladores.
+
+## ✅ Verificación del release
+
+- `npm run typecheck`
+- `npm test`: 30 contratos frontend, 15 pruebas unitarias y 4 contratos backend aprobados.
+- `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`
+- `npm run build`
+- `npm run tauri build`: bundles NSIS y MSI Windows x64 generados correctamente con `vmspect v0.9.0`.
+
+Los instaladores se generan en:
+
+- `src-tauri/target/release/bundle/nsis/VM Inventory_4.0.0_x64-setup.exe`
+- `src-tauri/target/release/bundle/msi/VM Inventory_4.0.0_x64_en-US.msi`
+
+---
+
 # VM Inventory v3.3.0 - Telemetría visual y actualización de vmspect
 
 ## 🚀 Resumen del lanzamiento

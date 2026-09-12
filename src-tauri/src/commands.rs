@@ -278,9 +278,11 @@ pub async fn consultar_software_en_jsons(
     filtro_tipo: Option<String>,
     filtro_responsable: Option<String>,
     limite_coincidencias: Option<usize>,
+    criterio_agrupacion: Option<String>,
+    pagina: Option<usize>,
 ) -> Result<ResultadoConsultaSoftware, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        crate::consultor::consultar_software_inventario_con_limite(
+        crate::consultor::consultar_software_inventario_con_agrupacion(
             &directorio,
             filtro_programa,
             filtro_version,
@@ -288,6 +290,8 @@ pub async fn consultar_software_en_jsons(
             filtro_tipo,
             filtro_responsable,
             limite_coincidencias.unwrap_or(30),
+            crate::models::CriterioAgrupacion::desde_valor(criterio_agrupacion.as_deref()),
+            pagina.unwrap_or(1),
         )
     })
     .await
@@ -323,7 +327,7 @@ pub fn probar_clasificacion_software(
 
     // Contexto informativo del sistema operativo objetivo en el veredicto.
     if let Some(so) = sistema_operativo.as_deref() {
-        if veredicto.categoria.is_none() && !veredicto.es_whitelist {
+        if veredicto.categoria.is_none() {
             veredicto.motivo_veredicto = format!(
                 "{} (evaluado como software de {so}).",
                 veredicto.motivo_veredicto.trim_end_matches('.')

@@ -76,11 +76,16 @@ export class FakeElement implements DomElementLike {
     const domEvent: DomEvent = {
       ...event,
       type,
-      target: this
+      target: event.target ?? this
     };
     for (const listener of this.listeners.get(type) ?? []) {
       listener(domEvent);
     }
+  }
+
+  closest(selector: string): DomElementLike | null {
+    const attribute = selector.match(/^\[([^\]]+)\]$/)?.[1];
+    return attribute && this.hasAttribute(attribute) ? this : null;
   }
 
   setAttribute(name: string, value: string): void {

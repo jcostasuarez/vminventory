@@ -65,7 +65,7 @@ pub struct ClasificacionSoftware {
     pub tags: Vec<String>,
 }
 
-/// Entrada de patrón de coincidencia (whitelist o ruido).
+/// Entrada de patrón de ruido.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct EntradaPatron {
     #[serde(default, alias = "nombre")]
@@ -93,8 +93,6 @@ pub struct ReglasArchivo {
     pub exclusions: ExclusionesConfig,
     #[serde(default)]
     pub classifications: Vec<ClasificacionSoftware>,
-    #[serde(default)]
-    pub whitelist: Vec<EntradaPatron>,
     #[serde(default, alias = "ruido")]
     pub noise: Vec<EntradaPatron>,
     #[serde(default, alias = "categoria", alias = "categorias")]
@@ -110,7 +108,6 @@ pub struct ReglasClasificacion {
     pub origen: String,
     pub exclusions: ExclusionesConfig,
     pub classifications: Vec<ClasificacionSoftware>,
-    pub whitelist: Vec<EntradaPatron>,
     pub ruido: Vec<EntradaPatron>,
     pub categorias: Vec<CategoriaReglas>,
     compiladas: ReglasCompiladas,
@@ -124,7 +121,6 @@ pub struct ReglasClasificacion {
 struct ReglasCompiladas {
     exclusiones: ExclusionesCompiladas,
     clasificaciones: Vec<ClasificacionSoftwareCompilada>,
-    whitelist: Vec<EntradaPatronCompilada>,
     ruido: Vec<EntradaPatronCompilada>,
     categorias: Vec<CategoriaReglasCompilada>,
 }
@@ -568,84 +564,6 @@ impl ReglasClasificacion {
             },
         ];
 
-        let whitelist = vec![
-            entrada(
-                "microsoft office",
-                Some("Microsoft"),
-                "Suite ofimática corporativa estándar.",
-            ),
-            entrada(
-                "microsoft 365",
-                Some("Microsoft"),
-                "Suscripción ofimática corporativa estándar.",
-            ),
-            entrada(
-                "adobe acrobat",
-                Some("Adobe"),
-                "Lector/editor de PDF estándar de la organización.",
-            ),
-            entrada(
-                "autocad",
-                Some("Autodesk"),
-                "Herramienta de diseño asistido (CAD) crítica.",
-            ),
-            entrada(
-                "visual studio",
-                Some("Microsoft"),
-                "Entorno de desarrollo corporativo prioritario.",
-            ),
-            entrada(
-                "sql server",
-                Some("Microsoft"),
-                "Motor de base de datos corporativo prioritario.",
-            ),
-            entrada(
-                "vmware tools",
-                Some("VMware"),
-                "Stack de integración de VMware: revela la plataforma de la VM.",
-            ),
-            entrada(
-                "virtualbox guest additions",
-                Some("Oracle"),
-                "Stack de integración de VirtualBox: revela la plataforma de la VM.",
-            ),
-            entrada(
-                "eset",
-                Some("ESET"),
-                "Endpoint de seguridad corporativo obligatorio.",
-            ),
-            entrada(
-                "kaspersky",
-                Some("Kaspersky"),
-                "Endpoint de seguridad corporativo obligatorio.",
-            ),
-            entrada(
-                "mcafee",
-                Some("McAfee"),
-                "Endpoint de seguridad corporativo obligatorio.",
-            ),
-            entrada(
-                "sophos",
-                Some("Sophos"),
-                "Endpoint de seguridad corporativo obligatorio.",
-            ),
-            entrada(
-                "trend micro",
-                Some("Trend Micro"),
-                "Endpoint de seguridad corporativo obligatorio.",
-            ),
-            entrada(
-                "forticlient",
-                Some("Fortinet"),
-                "Cliente VPN/seguridad corporativo obligatorio.",
-            ),
-            entrada(
-                "globalprotect",
-                Some("Palo Alto"),
-                "Cliente VPN/seguridad corporativo obligatorio.",
-            ),
-        ];
-
         let ruido = vec![
             entrada(
                 "redistributable",
@@ -861,7 +779,6 @@ impl ReglasClasificacion {
         ReglasArchivo {
             exclusions,
             classifications,
-            whitelist,
             noise: ruido,
             categories: categorias,
         }
@@ -887,7 +804,6 @@ impl ReglasClasificacion {
             origen,
             exclusions: configuracion.exclusions,
             classifications: configuracion.classifications,
-            whitelist: configuracion.whitelist,
             ruido: configuracion.noise,
             categorias: configuracion.categories,
             compiladas,
@@ -902,7 +818,6 @@ impl ReglasClasificacion {
         let configuracion = ReglasArchivo {
             exclusions: self.exclusions.clone(),
             classifications: self.classifications.clone(),
-            whitelist: self.whitelist.clone(),
             noise: self.ruido.clone(),
             categories: self.categorias.clone(),
         };
@@ -954,13 +869,6 @@ impl ReglasClasificacion {
         if !archivo_usuario.classifications.is_empty() {
             for c in archivo_usuario.classifications.into_iter().rev() {
                 configuracion.classifications.insert(0, c);
-            }
-        }
-
-        // Incorporar whitelist
-        for e in archivo_usuario.whitelist {
-            if !e.patron.trim().is_empty() {
-                configuracion.whitelist.push(e);
             }
         }
 
@@ -1018,7 +926,7 @@ impl ReglasClasificacion {
 
         InfoReglas {
             origen_reglas: self.origen.clone(),
-            total_whitelist: self.whitelist.len(),
+            total_noise: self.ruido.len(),
             categorias,
             total_clasificaciones: self.classifications.len(),
             total_exclusiones_carpetas: self.exclusions.folders.len(),
@@ -1041,24 +949,19 @@ impl ReglasClasificacion {
     }
 
     /// Clasifica un programa aplicando la jerarquía de reglas:
-    /// 1. Whitelist global (máxima prioridad)
+    /// 1. Ruido del sistema (descarte prioritario)
     /// 2. Clasificaciones específicas de software industrial / de usuario
-    /// 3. Ruido del sistema (descarte)
-    /// 4. Categorías temáticas
-    /// 5. Software no catalogado relevante
+    /// 3. Categorías temáticas
+    /// 4. Software no catalogado relevante
     pub fn clasificar(&self, nombre: &str, editor: Option<&str>) -> ResultadoClasificacion {
-        // 1. Whitelist global: inclusión prioritaria
-        for e in &self.compiladas.whitelist {
+        // 1. Ruido del sistema: se descarta antes de cualquier clasificación
+        for e in &self.compiladas.ruido {
             if e.coincide(nombre, editor) {
-                let (categoria, tags) = self
-                    .categoria_de(nombre, editor)
-                    .map_or((None, Vec::new()), |(c, t)| (Some(c), t));
                 return ResultadoClasificacion {
-                    es_relevante: true,
-                    es_whitelist: true,
-                    motivo_veredicto: format!("Whitelist global (prioridad alta): {}", e.motivo),
-                    categoria,
-                    tags,
+                    es_relevante: false,
+                    motivo_veredicto: format!("Descartado como ruido del sistema: {}", e.motivo),
+                    categoria: None,
+                    tags: Vec::new(),
                 };
             }
         }
@@ -1080,7 +983,6 @@ impl ReglasClasificacion {
                             .unwrap_or_else(|| "Automatización Industrial".to_string());
                         return ResultadoClasificacion {
                             es_relevante: true,
-                            es_whitelist: false,
                             motivo_veredicto: format!(
                                 "Clasificado como «{}» ({}) por regla de software industrial.",
                                 c.software,
@@ -1097,24 +999,10 @@ impl ReglasClasificacion {
             }
         }
 
-        // 3. Ruido del sistema: se descarta del reporte
-        for e in &self.compiladas.ruido {
-            if e.coincide(nombre, editor) {
-                return ResultadoClasificacion {
-                    es_relevante: false,
-                    es_whitelist: false,
-                    motivo_veredicto: format!("Descartado como ruido del sistema: {}", e.motivo),
-                    categoria: None,
-                    tags: Vec::new(),
-                };
-            }
-        }
-
-        // 4. Categorías temáticas: software relevante y etiquetado
+        // 3. Categorías temáticas: software relevante y etiquetado
         match self.categoria_de(nombre, editor) {
             Some((categoria, tags)) => ResultadoClasificacion {
                 es_relevante: true,
-                es_whitelist: false,
                 motivo_veredicto: format!(
                     "Clasificado en la categoría «{categoria}» por coincidencia de patrones."
                 ),
@@ -1123,7 +1011,6 @@ impl ReglasClasificacion {
             },
             None => ResultadoClasificacion {
                 es_relevante: true,
-                es_whitelist: false,
                 motivo_veredicto:
                     "Sin coincidencia de reglas: se incluye como software no categorizado."
                         .to_string(),
@@ -1217,23 +1104,6 @@ impl ReglasCompiladas {
             });
         }
 
-        let mut whitelist = Vec::with_capacity(configuracion.whitelist.len());
-        for (indice, entrada) in configuracion.whitelist.iter().enumerate() {
-            whitelist.push(EntradaPatronCompilada {
-                patron: compilar_patron_en_contexto(
-                    &entrada.patron,
-                    format!("whitelist[{indice}].patron"),
-                    &mut diagnosticos,
-                ),
-                editor: compilar_editor(
-                    entrada.editor.as_deref(),
-                    format!("whitelist[{indice}].editor"),
-                    &mut diagnosticos,
-                ),
-                motivo: entrada.motivo.clone(),
-            });
-        }
-
         let mut ruido = Vec::with_capacity(configuracion.noise.len());
         for (indice, entrada) in configuracion.noise.iter().enumerate() {
             ruido.push(EntradaPatronCompilada {
@@ -1268,7 +1138,6 @@ impl ReglasCompiladas {
             Self {
                 exclusiones,
                 clasificaciones,
-                whitelist,
                 ruido,
                 categorias,
             },
@@ -1614,18 +1483,17 @@ mod tests {
         let configuracion = ReglasArchivo {
             exclusions: ExclusionesConfig::default(),
             classifications: Vec::new(),
-            whitelist: vec![EntradaPatron {
+            noise: vec![EntradaPatron {
                 patron: "regex:[".to_string(),
                 editor: None,
                 motivo: "fixture".to_string(),
             }],
-            noise: Vec::new(),
             categories: Vec::new(),
         };
 
         let (_, diagnosticos) = ReglasCompiladas::compilar(&configuracion);
         assert_eq!(diagnosticos.len(), 1);
-        assert_eq!(diagnosticos[0].contexto, "whitelist[0].patron");
+        assert_eq!(diagnosticos[0].contexto, "noise[0].patron");
         assert_eq!(diagnosticos[0].patron, "regex:[");
         assert!(diagnosticos[0]
             .detalle
@@ -1637,11 +1505,7 @@ mod tests {
         assert!(compilado.coincide("regex:["));
     }
 
-    fn reglas_de_precedencia(
-        incluir_whitelist: bool,
-        incluir_especifica: bool,
-        incluir_ruido: bool,
-    ) -> ReglasClasificacion {
+    fn reglas_de_precedencia(incluir_especifica: bool, incluir_ruido: bool) -> ReglasClasificacion {
         ReglasClasificacion::desde_configuracion(
             "fixture de precedencia",
             ReglasArchivo {
@@ -1657,15 +1521,7 @@ mod tests {
                 } else {
                     Vec::new()
                 },
-                whitelist: if incluir_whitelist {
-                    vec![EntradaPatron {
-                        patron: "Herramienta de prueba".to_string(),
-                        editor: None,
-                        motivo: "prioridad máxima".to_string(),
-                    }]
-                } else {
-                    Vec::new()
-                },
+
                 noise: if incluir_ruido {
                     vec![EntradaPatron {
                         patron: "Herramienta de prueba".to_string(),
@@ -1685,29 +1541,25 @@ mod tests {
     }
 
     #[test]
-    fn conserva_la_precedencia_de_clasificacion() {
+    fn aplica_noise_antes_de_clasificacion_y_categoria() {
         let nombre = "Herramienta de prueba";
 
-        let resultado = reglas_de_precedencia(true, true, true).clasificar(nombre, None);
-        assert!(resultado.es_relevante);
-        assert!(resultado.es_whitelist);
-        assert_eq!(resultado.categoria.as_deref(), Some("Temática"));
-        assert_eq!(resultado.tags, vec!["tematica"]);
+        let resultado = reglas_de_precedencia(true, true).clasificar(nombre, None);
+        assert!(!resultado.es_relevante);
+        assert_eq!(resultado.categoria, None);
+        assert!(resultado.motivo_veredicto.contains("ruido"));
 
-        let resultado = reglas_de_precedencia(false, true, true).clasificar(nombre, None);
+        let resultado = reglas_de_precedencia(false, true).clasificar(nombre, None);
+        assert!(!resultado.es_relevante);
+        assert_eq!(resultado.categoria, None);
+
+        let resultado = reglas_de_precedencia(true, false).clasificar(nombre, None);
         assert!(resultado.es_relevante);
-        assert!(!resultado.es_whitelist);
         assert_eq!(resultado.categoria.as_deref(), Some("Específica"));
         assert_eq!(resultado.tags, vec!["especifica"]);
 
-        let resultado = reglas_de_precedencia(false, false, true).clasificar(nombre, None);
-        assert!(!resultado.es_relevante);
-        assert!(!resultado.es_whitelist);
-        assert_eq!(resultado.categoria, None);
-
-        let resultado = reglas_de_precedencia(false, false, false).clasificar(nombre, None);
+        let resultado = reglas_de_precedencia(false, false).clasificar(nombre, None);
         assert!(resultado.es_relevante);
-        assert!(!resultado.es_whitelist);
         assert_eq!(resultado.categoria.as_deref(), Some("Temática"));
         assert_eq!(resultado.tags, vec!["tematica"]);
     }

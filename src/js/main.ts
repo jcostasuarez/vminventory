@@ -10,6 +10,7 @@ import type {
   ConsultarSoftwarePayload,
   ConsultorApi,
   ConsultorFlowUi,
+  ConsultorTableField,
   DiagnosticoSistema,
   DocumentLike,
   EstadoSupervision,
@@ -418,12 +419,36 @@ export class ConsultorFlow {
     this.ui.selectBuscarTipo?.addEventListener('change', () => {
       void this.buscar();
     });
+    this.ui.selectCriterioAgrupacion?.addEventListener('change', () => {
+      void this.buscar();
+    });
 
     this.ui.consultorActiveFilters?.addEventListener('click', (event) => {
       const chip = event.target?.closest?.('[data-filter-clear]');
       const field = chip?.getAttribute('data-filter-clear');
       if (field) this.limpiarFiltroIndividual(field);
     });
+    this.ui.onConsultorFilterValueSelected = (field, value) => {
+      this.aplicarFiltroDesdeTabla(field, value);
+    };
+  }
+
+  private aplicarFiltroDesdeTabla(field: ConsultorTableField, value: string): void {
+    const normalized = value.trim();
+    if (!normalized) return;
+    const controls: Partial<Record<ConsultorTableField, 'inputBuscarPrograma' | 'inputBuscarVm' | 'inputBuscarVersion' | 'selectBuscarTipo' | 'inputBuscarResponsable'>> = {
+      programa: 'inputBuscarPrograma',
+      vm: 'inputBuscarVm',
+      version: 'inputBuscarVersion',
+      tipo: 'selectBuscarTipo',
+      responsable: 'inputBuscarResponsable'
+    };
+    const controlName = controls[field];
+    const control = controlName ? this.ui[controlName] : null;
+    if (!control) return;
+    control.value = normalized;
+    this.ui.actualizarBotonesLimpieza?.();
+    void this.buscar();
   }
 
   private limpiarFiltroIndividual(field: string): void {
@@ -476,7 +501,8 @@ export class ConsultorFlow {
         filtroVersion: filtros.version || null,
         filtroTipo: filtros.tipo !== 'todos' ? filtros.tipo : null,
         filtroResponsable: filtros.responsable || null,
-        limiteCoincidencias: this.state.config.limite_coincidencias
+        limiteCoincidencias: this.state.config.limite_coincidencias,
+        criterioAgrupacion: this.leerCriterioAgrupacion()
       });
 
       if (requestId !== this.requestId || !resultado) return resultado;
@@ -501,6 +527,15 @@ export class ConsultorFlow {
     } finally {
       if (requestId === this.requestId) this.ui.setRecargando?.(false);
     }
+  }
+
+  private leerCriterioAgrupacion(): ConsultarSoftwarePayload['criterioAgrupacion'] {
+    const criterio = this.ui.selectCriterioAgrupacion?.value;
+    return [
+      'sin-agrupar', 'maquina-virtual', 'categoria', 'sistema-operativo', 'responsable', 'tipo'
+    ].includes(criterio || '')
+      ? criterio as NonNullable<ConsultarSoftwarePayload['criterioAgrupacion']>
+      : 'sin-agrupar';
   }
 
   leerFiltros(): SearchFilters {

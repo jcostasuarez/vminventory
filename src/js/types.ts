@@ -100,6 +100,17 @@ export interface SearchFilters {
   responsable: string;
 }
 
+export type ConsultorViewMode = 'cards' | 'table' | 'map';
+export type ConsultorTableField = keyof SearchFilters;
+
+export type CriterioAgrupacion =
+  | 'sin-agrupar'
+  | 'maquina-virtual'
+  | 'categoria'
+  | 'sistema-operativo'
+  | 'responsable'
+  | 'tipo';
+
 export interface ConsultarSoftwarePayload {
   directorio: string;
   filtroPrograma: string | null;
@@ -108,6 +119,8 @@ export interface ConsultarSoftwarePayload {
   filtroTipo: string | null;
   filtroResponsable: string | null;
   limiteCoincidencias?: number;
+  criterioAgrupacion?: CriterioAgrupacion;
+  pagina?: number;
 }
 
 export interface CoincidenciaSoftware {
@@ -129,6 +142,28 @@ export interface CoincidenciaSoftware {
   fecha_relevamiento?: string | null;
 }
 
+export interface ResumenGrupoSoftware {
+  sistemas_operativos?: unknown[];
+  responsables?: unknown[];
+  categorias?: unknown[];
+}
+
+export interface GrupoSoftware {
+  clave?: string | null;
+  valor?: string | null;
+  criterio?: CriterioAgrupacion | null;
+  cantidad_tarjetas?: number | null;
+  resumen?: ResumenGrupoSoftware | null;
+  tarjetas?: CoincidenciaSoftware[];
+}
+
+/** Fila de tabla con identidad de grupo conservada para la presentación. */
+export interface ConsultorTableRow {
+  item: CoincidenciaSoftware;
+  claveGrupo: string | null;
+  indiceGrupo: number | null;
+}
+
 export interface ResultadoConsultaSoftware {
   total_archivos_json?: number;
   total_vms_escaneadas?: number;
@@ -141,6 +176,11 @@ export interface ResultadoConsultaSoftware {
   categorias_disponibles?: unknown[];
   tags_disponibles?: unknown[];
   coincidencias?: CoincidenciaSoftware[];
+  /** El alias histórico se acepta al deserializar; las respuestas nuevas usan `grupos`. */
+  grupos?: GrupoSoftware[] | null;
+  total_coincidencias?: number;
+  total_grupos?: number | null;
+  total_vms_involucradas?: number;
 }
 
 export interface RelevamientoPayload {
@@ -372,6 +412,7 @@ export interface ConsultorFlowUi {
   inputBuscarVersion?: DomElementLike | null;
   inputBuscarResponsable?: DomElementLike | null;
   selectBuscarTipo?: DomElementLike | null;
+  selectCriterioAgrupacion?: DomElementLike | null;
   btnToggleTheme?: DomElementLike | null;
   btnWinMinimize?: DomElementLike | null;
   btnWinMaximize?: DomElementLike | null;
@@ -385,6 +426,7 @@ export interface ConsultorFlowUi {
   cfgRutaBdJson?: DomElementLike | null;
   cfgLimiteCoincidencias?: DomElementLike | null;
   consultorActiveFilters?: DomElementLike | null;
+  onConsultorFilterValueSelected?: ((field: keyof SearchFilters, value: string) => void) | null;
   actualizarBotonesLimpieza?(): void;
   limpiarFiltros?(): void;
   sincronizarAjustes?(config: AppConfig): void;

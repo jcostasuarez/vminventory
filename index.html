@@ -268,11 +268,32 @@
 
       <div class="consultor-summary-bar" role="status" aria-live="polite">
         <div class="consultor-summary-info" id="lblSoftwareMetricas">Configura la carpeta de inventario para comenzar.</div>
+        <div class="consultor-summary-controls">
+          <label class="form-label" for="selectCriterioAgrupacion">Agrupar resultados</label>
+          <select id="selectCriterioAgrupacion" class="form-input consultor-group-select" aria-controls="consultorCardsWrapper">
+            <option value="sin-agrupar">Sin agrupar</option>
+            <option value="maquina-virtual">Agrupar por máquina virtual</option>
+            <option value="categoria">Agrupar por categoría</option>
+            <option value="sistema-operativo">Agrupar por sistema operativo</option>
+            <option value="responsable">Agrupar por responsable</option>
+            <option value="tipo">Agrupar por tipo</option>
+          </select>
+        </div>
+        <div class="consultor-view-selector" role="group" aria-label="Modo de vista de resultados">
+          <span class="form-label">Vista</span>
+          <div class="consultor-view-buttons">
+            <button class="consultor-view-button active" id="btnConsultorVistaTarjetas" type="button" aria-pressed="true" aria-controls="consultorCardsWrapper">Tarjetas</button>
+            <button class="consultor-view-button" id="btnConsultorVistaTabla" type="button" aria-pressed="false" aria-controls="consultorTableWrapper">Tabla</button>
+            <button class="consultor-view-button" id="btnConsultorVistaMapa" type="button" aria-pressed="false" aria-controls="consultorGraphWrapper">Mapa</button>
+          </div>
+        </div>
         <span class="consultor-loading-indicator" id="consultorLoadingIndicator" style="display:none"><span class="consultor-spinner" aria-hidden="true"></span>Buscando…</span>
       </div>
 
       <div class="consultor-results-wrapper">
         <div class="consultor-cards-wrapper" id="consultorCardsWrapper" style="display:none"></div>
+        <div class="consultor-table-wrapper is-hidden" id="consultorTableWrapper" style="display:none"></div>
+        <div class="consultor-graph-wrapper is-hidden" id="consultorGraphWrapper" style="display:none"></div>
         <div class="empty-history-text" id="consultorEmptyState">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
             <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -374,9 +395,9 @@
       </div>
       <div class="modal-body">
         <div class="form-field">
-          <label class="form-label" for="cfgLimiteCoincidencias">Máximo de coincidencias por búsqueda</label>
+          <label class="form-label" for="cfgLimiteCoincidencias">Límite de coincidencias (compatibilidad)</label>
           <input id="cfgLimiteCoincidencias" class="form-input" type="number" min="10" max="100" step="1" value="30" />
-          <div class="form-help">Limita los resultados mostrados para mantener la consulta ágil. Se permiten valores entre 10 y 100.</div>
+          <div class="form-help">Se conserva para compatibilidad. El Consultor muestra todas las coincidencias que cumplen los filtros.</div>
         </div>
         <div class="form-field">
           <label class="form-label" for="cfgRutaBdJson">Carpeta de inventario (reportes JSON)</label>
